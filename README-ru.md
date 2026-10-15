@@ -56,7 +56,11 @@
 
 ### 1. Приложение для телефона
 
-Нужны JDK 17+ (например, из комплекта Android Studio) и Android SDK.
+**Скачать:** [SimpleZepp-0.1.0.apk](https://github.com/iArti/SimpleZepp/releases/download/v0.1.0/SimpleZepp-0.1.0.apk)
+из [Releases](https://github.com/iArti/SimpleZepp/releases/latest) (подписан ключом автора) и установить —
+или собрать самому. APK с другой подписью поверх не встанет: сначала удалите установленный.
+
+Для сборки нужны JDK 17+ (например, из комплекта Android Studio) и Android SDK.
 
 ```bash
 ./gradlew :mobile:assembleDebug

@@ -55,7 +55,11 @@ Code: `mobile/…/zepp/` (bridge), `zepp/` (watch app, app-side, shortcut card).
 
 ### 1. Phone app
 
-Requirements: JDK 17+ (e.g. the one bundled with Android Studio) and the Android SDK.
+**Download:** [SimpleZepp-0.1.0.apk](https://github.com/iArti/SimpleZepp/releases/download/v0.1.0/SimpleZepp-0.1.0.apk)
+from [Releases](https://github.com/iArti/SimpleZepp/releases/latest) (signed with the author's key) and install it,
+or build it yourself. An APK signed with a different key can't update it: uninstall first.
+
+To build: JDK 17+ (e.g. the one bundled with Android Studio) and the Android SDK.
 
 ```bash
 ./gradlew :mobile:assembleDebug
