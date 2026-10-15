@@ -1,0 +1,20 @@
+// Release signing for the Zepp OS fork; keystore/keystore.properties is not committed
+def keystoreFile = rootProject.file('keystore/keystore.properties')
+if (keystoreFile.exists()) {
+    def props = new Properties()
+    keystoreFile.withInputStream { props.load(it) }
+    android {
+        signingConfigs {
+            zepp {
+                storeFile rootProject.file('keystore/' + new File(props['storeFile']).name)
+                storePassword props['storePassword']
+                keyAlias props['keyAlias']
+                keyPassword props['keyPassword']
+            }
+        }
+        buildTypes {
+            release { signingConfig signingConfigs.zepp }
+            debug { signingConfig signingConfigs.zepp }
+        }
+    }
+}

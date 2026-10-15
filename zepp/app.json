@@ -1,0 +1,68 @@
+{
+  "configVersion": "v3",
+  "app": {
+    "appId": 1145144,
+    "appName": "SimpleZepp",
+    "appType": "app",
+    "version": {
+      "code": 1,
+      "name": "0.1.0"
+    },
+    "icon": "icon.png",
+    "vender": "personal",
+    "description": "Control your Android phone from the watch (SimpleWear port)"
+  },
+  "permissions": [
+    "device:os.local_storage"
+  ],
+  "runtime": {
+    "apiVersion": {
+      "compatible": "3.6",
+      "target": "3.6",
+      "minVersion": "3.6"
+    }
+  },
+  "targets": {
+    "common": {
+      "module": {
+        "page": {
+          "pages": [
+            "page/dashboard/index",
+            "page/value/index",
+            "page/apps/index"
+          ]
+        },
+        "app-side": {
+          "path": "app-side/index"
+        },
+        "app-widget": {
+          "widgets": [
+            {
+              "path": "app-widget/index",
+              "icon": "icon.png",
+              "name": "SimpleZepp",
+              "runtime": {
+                "type": "js"
+              }
+            }
+          ]
+        }
+      },
+      "platforms": [
+        {
+          "st": "r"
+        }
+      ],
+      "designWidth": 480
+    }
+  },
+  "i18n": {
+    "en-US": {
+      "appName": "SimpleZepp"
+    },
+    "ru-RU": {
+      "appName": "SimpleZepp"
+    }
+  },
+  "defaultLanguage": "en-US"
+}

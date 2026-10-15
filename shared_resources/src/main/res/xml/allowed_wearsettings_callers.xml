@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Upstream keeps this list private (gitignored). The Zepp OS fork runs the Helper's actions
+    in-process, so no external caller is trusted; the file only has to exist for PackageValidator.
+-->
+<signatures />

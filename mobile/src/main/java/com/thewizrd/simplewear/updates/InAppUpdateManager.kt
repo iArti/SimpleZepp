@@ -11,7 +11,6 @@ import com.google.android.play.core.install.model.AppUpdateType
 import com.google.android.play.core.install.model.InstallErrorCode
 import com.google.android.play.core.install.model.UpdateAvailability
 import com.google.android.play.core.ktx.requestAppUpdateInfo
-import com.google.firebase.remoteconfig.FirebaseRemoteConfig
 import com.google.gson.reflect.TypeToken
 import com.thewizrd.shared_resources.helpers.WearableHelper
 import com.thewizrd.shared_resources.updates.UpdateInfo
@@ -37,6 +36,8 @@ class InAppUpdateManager private constructor(context: Context) {
     private var configUpdateinfo: UpdateInfo? = null
 
     suspend fun checkIfUpdateAvailable(): Boolean {
+        // Zepp OS fork is sideloaded: no Play Store / Firebase update checks
+        if (true) return false
         try {
             // Returns an intent object that you use to check for an update.
             appUpdateInfo = appUpdateManager.requestAppUpdateInfo()
@@ -75,13 +76,8 @@ class InAppUpdateManager private constructor(context: Context) {
     // TODO: until this is implemented in Play Console, use Firebase RemoteConfig
     private suspend fun getRemoteUpdateInfo(): List<UpdateInfo>? {
         return withContext(Dispatchers.IO) {
-            val mConfig = FirebaseRemoteConfig.getInstance()
-            mConfig.fetchAndActivate().await()
-
-            val json = mConfig.getString("android_updates")
-
-            val updateTypeToken = object : TypeToken<List<UpdateInfo>>() {}.type
-            return@withContext JSONParser.deserializer(json, updateTypeToken)
+            // Firebase RemoteConfig is not part of the Zepp OS fork
+            return@withContext null
         }
     }
 

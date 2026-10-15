@@ -24,7 +24,6 @@ import com.google.android.gms.wearable.Node
 import com.google.android.gms.wearable.Wearable
 import com.google.gson.reflect.TypeToken
 import com.google.gson.stream.JsonWriter
-import com.thewizrd.shared_resources.actions.ACTION_PERFORMACTION
 import com.thewizrd.shared_resources.actions.Action
 import com.thewizrd.shared_resources.actions.ActionStatus
 import com.thewizrd.shared_resources.actions.Actions
@@ -32,13 +31,9 @@ import com.thewizrd.shared_resources.actions.AudioStreamState
 import com.thewizrd.shared_resources.actions.AudioStreamType
 import com.thewizrd.shared_resources.actions.BatteryStatus
 import com.thewizrd.shared_resources.actions.DNDChoice
-import com.thewizrd.shared_resources.actions.EXTRA_ACTION_CALLINGPKG
-import com.thewizrd.shared_resources.actions.EXTRA_ACTION_DATA
-import com.thewizrd.shared_resources.actions.EXTRA_ACTION_ERROR
 import com.thewizrd.shared_resources.actions.GestureActionState
 import com.thewizrd.shared_resources.actions.MultiChoiceAction
 import com.thewizrd.shared_resources.actions.NormalAction
-import com.thewizrd.shared_resources.actions.RemoteActionReceiver
 import com.thewizrd.shared_resources.actions.RingerChoice
 import com.thewizrd.shared_resources.actions.TimedAction
 import com.thewizrd.shared_resources.actions.ToggleAction
@@ -50,7 +45,8 @@ import com.thewizrd.shared_resources.data.AppItemData
 import com.thewizrd.shared_resources.data.AppItemSerializer.serialize
 import com.thewizrd.shared_resources.helpers.GestureUIHelper
 import com.thewizrd.shared_resources.helpers.MediaHelper
-import com.thewizrd.shared_resources.helpers.WearSettingsHelper
+import com.thewizrd.simplewear.zepp.BuiltInHelper
+import com.thewizrd.simplewear.zepp.ZeppBridge
 import com.thewizrd.shared_resources.helpers.WearableHelper
 import com.thewizrd.shared_resources.media.MusicPlayersData
 import com.thewizrd.shared_resources.utils.ContextUtils.dpToPx
@@ -60,7 +56,6 @@ import com.thewizrd.shared_resources.utils.JSONParser
 import com.thewizrd.shared_resources.utils.Logger
 import com.thewizrd.shared_resources.utils.booleanToBytes
 import com.thewizrd.shared_resources.utils.stringToBytes
-import com.thewizrd.shared_resources.wearsettings.PackageValidator
 import com.thewizrd.simplewear.helpers.AlarmStateManager
 import com.thewizrd.simplewear.helpers.PhoneStatusHelper
 import com.thewizrd.simplewear.helpers.ResolveInfoActivityInfoComparator
@@ -103,7 +98,6 @@ class WearableManager(private val mContext: Context) : OnCapabilityChangedListen
     private lateinit var mCapabilityClient: CapabilityClient
     private var mWearNodesWithApp: Collection<Node>? = null
 
-    private var mPackageValidator = PackageValidator(mContext)
 
     private fun init() {
         mCapabilityClient = Wearable.getCapabilityClient(mContext)
@@ -116,6 +110,7 @@ class WearableManager(private val mContext: Context) : OnCapabilityChangedListen
     }
 
     suspend fun isWearNodesAvailable(): Boolean {
+        if (ZeppBridge.isConnected()) return true
         if (mWearNodesWithApp == null) {
             mWearNodesWithApp = findWearDevicesWithApp()
         }
@@ -345,33 +340,16 @@ class WearableManager(private val mContext: Context) : OnCapabilityChangedListen
         )
 
         try {
-            val channelClient = Wearable.getChannelClient(mContext)
-
-            withContext(Dispatchers.IO) {
-                val channel =
-                    channelClient.openChannel(nodeID, MediaHelper.MusicPlayersPath).await()
-                val outputStream = channelClient.getOutputStream(channel).await()
-                outputStream.bufferedWriter().use { writer ->
-                    writer.write(
-                        "data: ${
-                            JSONParser.serializer(
-                                playersData,
-                                MusicPlayersData::class.java
-                            )
-                        }"
-                    )
-                    writer.newLine()
-                    writer.flush()
-                }
-                channelClient.close(channel)
-            }
+            ZeppBridge.enqueue(
+                MediaHelper.MusicPlayersPath,
+                JSONParser.serializer(playersData, MusicPlayersData::class.java).stringToBytes()
+            )
         } catch (e: Exception) {
             Logger.writeLine(Log.ERROR, e)
         }
     }
 
     suspend fun sendApps(nodeID: String) {
-        val channelClient = Wearable.getChannelClient(mContext)
         val mainIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
 
         val infos = mContext.packageManager.queryIntentActivities(mainIntent, 0)
@@ -408,16 +386,11 @@ class WearableManager(private val mContext: Context) : OnCapabilityChangedListen
         }
 
         try {
-            withContext(Dispatchers.IO) {
-                val channel = channelClient.openChannel(nodeID, WearableHelper.AppsPath).await()
-                val outputStream = channelClient.getOutputStream(channel).await()
-                outputStream.use {
-                    val writer = JsonWriter(BufferedWriter(OutputStreamWriter(it)))
-                    appItems.serialize(writer)
-                    writer.flush()
-                }
-                channelClient.close(channel)
-            }
+            val buffer = java.io.StringWriter()
+            val writer = JsonWriter(buffer)
+            appItems.serialize(writer)
+            writer.flush()
+            ZeppBridge.enqueue(WearableHelper.AppsPath, buffer.toString().stringToBytes())
         } catch (e: Exception) {
             Logger.writeLine(Log.ERROR, e)
         }
@@ -732,13 +705,13 @@ class WearableManager(private val mContext: Context) : OnCapabilityChangedListen
             Actions.WIFI -> {
                 tA = action as ToggleAction
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    if (WearSettingsHelper.isWearSettingsInstalled()) {
+                    if (BuiltInHelper.isAvailable) {
                         val status = performRemoteAction(action)
                         if (status == ActionStatus.REMOTE_FAILURE ||
                             status == ActionStatus.REMOTE_PERMISSION_DENIED
                         ) {
                             tA.setActionSuccessful(status)
-                            WearSettingsHelper.launchWearSettings()
+                            BuiltInHelper.openSettings(mContext)
                         }
                     } else {
                         /* WifiManager.setWifiEnabled is unavailable as of Android 10 */
@@ -757,13 +730,13 @@ class WearableManager(private val mContext: Context) : OnCapabilityChangedListen
             Actions.BLUETOOTH -> {
                 tA = action as ToggleAction
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    if (WearSettingsHelper.isWearSettingsInstalled()) {
+                    if (BuiltInHelper.isAvailable) {
                         val status = performRemoteAction(action)
                         if (status == ActionStatus.REMOTE_FAILURE ||
                             status == ActionStatus.REMOTE_PERMISSION_DENIED
                         ) {
                             tA.setActionSuccessful(status)
-                            WearSettingsHelper.launchWearSettings()
+                            BuiltInHelper.openSettings(mContext)
                         }
                     } else {
                         /* BluetoothAdapter.enable/disable is no-op as of Android 13 */
@@ -786,13 +759,13 @@ class WearableManager(private val mContext: Context) : OnCapabilityChangedListen
             }
             Actions.MOBILEDATA -> {
                 tA = action as ToggleAction
-                if (WearSettingsHelper.isWearSettingsInstalled()) {
+                if (BuiltInHelper.isAvailable) {
                     val status = performRemoteAction(action)
                     if (status == ActionStatus.REMOTE_FAILURE ||
                         status == ActionStatus.REMOTE_PERMISSION_DENIED
                     ) {
                         tA.setActionSuccessful(status)
-                        WearSettingsHelper.launchWearSettings()
+                        BuiltInHelper.openSettings(mContext)
                     }
                 } else {
                     tA.setActionSuccessful(PhoneStatusHelper.openMobileDataSettings(mContext))
@@ -807,13 +780,13 @@ class WearableManager(private val mContext: Context) : OnCapabilityChangedListen
             Actions.LOCATION -> {
                 if (action is MultiChoiceAction) {
                     mA = action
-                    if (WearSettingsHelper.isWearSettingsInstalled()) {
+                    if (BuiltInHelper.isAvailable) {
                         val status = performRemoteAction(action)
                         if (status == ActionStatus.REMOTE_FAILURE ||
                             status == ActionStatus.REMOTE_PERMISSION_DENIED
                         ) {
                             mA.setActionSuccessful(status)
-                            WearSettingsHelper.launchWearSettings()
+                            BuiltInHelper.openSettings(mContext)
                         }
                     } else {
                         mA.setActionSuccessful(PhoneStatusHelper.openLocationSettings(mContext))
@@ -826,13 +799,13 @@ class WearableManager(private val mContext: Context) : OnCapabilityChangedListen
                     )
                 } else if (action is ToggleAction) {
                     tA = action
-                    if (WearSettingsHelper.isWearSettingsInstalled()) {
+                    if (BuiltInHelper.isAvailable) {
                         val status = performRemoteAction(action)
                         if (status == ActionStatus.REMOTE_FAILURE ||
                             status == ActionStatus.REMOTE_PERMISSION_DENIED
                         ) {
                             tA.setActionSuccessful(status)
-                            WearSettingsHelper.launchWearSettings()
+                            BuiltInHelper.openSettings(mContext)
                         }
                     } else {
                         tA.setActionSuccessful(PhoneStatusHelper.openLocationSettings(mContext))
@@ -853,7 +826,7 @@ class WearableManager(private val mContext: Context) : OnCapabilityChangedListen
             Actions.LOCKSCREEN -> {
                 nA = action as NormalAction
                 var status = PhoneStatusHelper.lockScreen(mContext)
-                if ((status == ActionStatus.FAILURE || status == ActionStatus.PERMISSION_DENIED) && WearSettingsHelper.isWearSettingsInstalled()) {
+                if ((status == ActionStatus.FAILURE || status == ActionStatus.PERMISSION_DENIED) && BuiltInHelper.isAvailable) {
                     status = performRemoteAction(action)
 
                     if (status == ActionStatus.REMOTE_FAILURE ||
@@ -889,7 +862,7 @@ class WearableManager(private val mContext: Context) : OnCapabilityChangedListen
                      */
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM && !PhoneStatusHelper.companionDeviceAssociated(
                             mContext
-                        ) && WearSettingsHelper.isWearSettingsInstalled()
+                        ) && BuiltInHelper.isAvailable
                     ) {
                         val status = performRemoteAction(action)
                         if (status == ActionStatus.REMOTE_FAILURE ||
@@ -915,7 +888,7 @@ class WearableManager(private val mContext: Context) : OnCapabilityChangedListen
                     tA = action
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM && !PhoneStatusHelper.companionDeviceAssociated(
                             mContext
-                        ) && WearSettingsHelper.isWearSettingsInstalled()
+                        ) && BuiltInHelper.isAvailable
                     ) {
                         val status = performRemoteAction(action)
                         if (status == ActionStatus.REMOTE_FAILURE ||
@@ -974,20 +947,20 @@ class WearableManager(private val mContext: Context) : OnCapabilityChangedListen
                 tA = action as ToggleAction
                 /* As of Android 15 (SDK 35) QPR2 Hotspot toggle doesn't work w/o root */
                 if (Build.VERSION.SDK_INT_FULL >= (Build.VERSION_CODES_FULL.VANILLA_ICE_CREAM + 2)) {
-                    if (WearSettingsHelper.isWearSettingsInstalled()) {
+                    if (BuiltInHelper.isAvailable) {
                         val status = performRemoteAction(action)
                         if (status == ActionStatus.REMOTE_FAILURE ||
                             status == ActionStatus.REMOTE_PERMISSION_DENIED
                         ) {
                             tA.setActionSuccessful(status)
-                            WearSettingsHelper.launchWearSettings()
+                            BuiltInHelper.openSettings(mContext)
                         }
                     } else {
                         tA.setActionSuccessful(PhoneStatusHelper.openWirelessSettings(mContext))
                         tA.isEnabled = PhoneStatusHelper.isWifiApEnabled(mContext)
                     }
                 } else {
-                    if (WearSettingsHelper.isWearSettingsInstalled()) {
+                    if (BuiltInHelper.isAvailable) {
                         val status = performRemoteAction(action)
                         if (status == ActionStatus.REMOTE_FAILURE ||
                             status == ActionStatus.REMOTE_PERMISSION_DENIED
@@ -1042,14 +1015,14 @@ class WearableManager(private val mContext: Context) : OnCapabilityChangedListen
 
             Actions.NFC -> {
                 tA = action as ToggleAction
-                if (WearSettingsHelper.isWearSettingsInstalled()) {
+                if (BuiltInHelper.isAvailable) {
                     val status = performRemoteAction(action)
 
                     if (status == ActionStatus.REMOTE_FAILURE ||
                         status == ActionStatus.REMOTE_PERMISSION_DENIED
                     ) {
                         tA.setActionSuccessful(status)
-                        WearSettingsHelper.launchWearSettings()
+                        BuiltInHelper.openSettings(mContext)
                     }
                 } else {
                     tA.setActionSuccessful(PhoneStatusHelper.setNfcEnabled(mContext, tA.isEnabled))
@@ -1063,14 +1036,14 @@ class WearableManager(private val mContext: Context) : OnCapabilityChangedListen
 
             Actions.BATTERYSAVER -> {
                 tA = action as ToggleAction
-                if (WearSettingsHelper.isWearSettingsInstalled()) {
+                if (BuiltInHelper.isAvailable) {
                     val status = performRemoteAction(action)
 
                     if (status == ActionStatus.REMOTE_FAILURE ||
                         status == ActionStatus.REMOTE_PERMISSION_DENIED
                     ) {
                         tA.setActionSuccessful(status)
-                        WearSettingsHelper.launchWearSettings()
+                        BuiltInHelper.openSettings(mContext)
                     }
                 } else {
                     tA.setActionSuccessful(
@@ -1200,6 +1173,10 @@ class WearableManager(private val mContext: Context) : OnCapabilityChangedListen
     }
 
     suspend fun sendMessage(nodeID: String?, path: String, data: ByteArray?) {
+        // Zepp OS fork: every phone -> watch message goes to the app-side's event queue
+        ZeppBridge.enqueue(path, data)
+        if (true) return
+
         if (nodeID == null) {
             if (mWearNodesWithApp == null) {
                 // Create requests if nodes exist with app support
@@ -1229,64 +1206,8 @@ class WearableManager(private val mContext: Context) : OnCapabilityChangedListen
     }
 
     private suspend fun performRemoteAction(action: Action): ActionStatus {
-        return try {
-            suspendCancellableCoroutine { continuation ->
-                val remoteActionReceiver = RemoteActionReceiver().apply {
-                    resultReceiver = object : RemoteActionReceiver.IResultReceiver {
-                        override fun onReceiveResult(resultCode: Int, resultData: Bundle) {
-                            if (resultCode == Activity.RESULT_OK) {
-                                if (continuation.isActive) {
-                                    continuation.resume(ActionStatus.SUCCESS)
-                                }
-                            } else {
-                                var resultStatus = ActionStatus.REMOTE_FAILURE
-
-                                if (resultData.containsKey(EXTRA_ACTION_ERROR)) {
-                                    Logger.writeLine(
-                                        Log.ERROR,
-                                        "Error executing remote action; Error: %s",
-                                        resultData.getString(EXTRA_ACTION_ERROR)
-                                    )
-                                } else if (resultData.containsKey(EXTRA_ACTION_DATA)) {
-                                    val actionData = resultData.getString(EXTRA_ACTION_DATA)
-                                    val resultAction =
-                                        JSONParser.deserializer(actionData, Action::class.java)
-                                    resultStatus = resultAction?.actionStatus ?: resultStatus
-                                }
-
-                                if (continuation.isActive) {
-                                    continuation.resume(resultStatus)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                continuation.invokeOnCancellation {
-                    remoteActionReceiver.resultReceiver = null
-                }
-
-                if (mPackageValidator.isKnownCaller(WearSettingsHelper.getPackageName())) {
-                    mContext.startService(
-                        Intent(ACTION_PERFORMACTION).apply {
-                            component = WearSettingsHelper.getSettingsServiceComponent()
-                            putExtra(EXTRA_ACTION_DATA, action.toRemoteAction(remoteActionReceiver))
-                            putExtra(EXTRA_ACTION_CALLINGPKG, mContext.packageName)
-                        }
-                    )
-                } else {
-                    throw IllegalStateException("Package: ${WearSettingsHelper.getPackageName()} has invalid certificate")
-                }
-            }
-        } catch (ce: CancellationException) {
-            ActionStatus.UNKNOWN
-        } catch (ise: IllegalStateException) {
-            // Likely background service restriction
-            Logger.writeLine(Log.ERROR, ise)
-            ActionStatus.REMOTE_PERMISSION_DENIED
-        } catch (e: Exception) {
-            Logger.writeLine(Log.ERROR, e)
-            ActionStatus.REMOTE_FAILURE
-        }
+        // Zepp OS fork: the Helper's actions are compiled into this app (targetSdk 28),
+        // so run them in-process instead of sending an intent to com.thewizrd.wearsettings
+        return BuiltInHelper.performAction(mContext, action)
     }
 }

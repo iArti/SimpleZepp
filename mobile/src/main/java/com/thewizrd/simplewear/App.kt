@@ -19,6 +19,8 @@ import android.net.wifi.WifiManager
 import android.nfc.NfcAdapter
 import android.os.BatteryManager
 import android.os.Build
+import com.thewizrd.simplewear.zepp.ZeppBridgeService
+import org.lsposed.hiddenapibypass.HiddenApiBypass
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -41,8 +43,6 @@ import com.thewizrd.shared_resources.utils.JSONParser
 import com.thewizrd.shared_resources.utils.Logger
 import com.thewizrd.simplewear.camera.TorchListener
 import com.thewizrd.simplewear.helpers.PhoneStatusHelper
-import com.thewizrd.simplewear.media.MediaControllerService
-import com.thewizrd.simplewear.services.CallControllerService
 import com.thewizrd.simplewear.telephony.SubscriptionListener
 import com.thewizrd.simplewear.wearable.WearableWorker
 import kotlinx.coroutines.cancel
@@ -77,7 +77,6 @@ class App : Application(), ActivityLifecycleCallbacks, Configuration.Provider {
             override val context = appLib.context // keep same context as applib
         }
 
-        FirebaseConfigurator.initialize(applicationContext)
 
         // Init common action broadcast receiver
         mActionsReceiver = object : BroadcastReceiver() {
@@ -280,25 +279,21 @@ class App : Application(), ActivityLifecycleCallbacks, Configuration.Provider {
         }
 
         WearableWorker.sendStatusUpdate(applicationContext)
-        if (com.thewizrd.simplewear.preferences.Settings.isBridgeMediaEnabled()) {
-            MediaControllerService.enqueueWork(
-                this,
-                Intent(this, MediaControllerService::class.java)
-                    .setAction(MediaControllerService.ACTION_CONNECTCONTROLLER)
-                    .putExtra(MediaControllerService.EXTRA_SOFTLAUNCH, true)
-            )
-        }
-        if (com.thewizrd.simplewear.preferences.Settings.isBridgeCallsEnabled()) {
-            CallControllerService.enqueueWork(
-                this,
-                Intent(this, CallControllerService::class.java)
-                    .setAction(CallControllerService.ACTION_CONNECTCONTROLLER)
-            )
-        }
+        // Zepp OS fork: no media / call bridging (Zepp OS has its own)
 
         DynamicColors.applyToActivitiesIfAvailable(this)
 
         startMigration()
+
+        ZeppBridgeService.start(this)
+    }
+
+    override fun attachBaseContext(base: Context?) {
+        super.attachBaseContext(base)
+        // Built-in Helper: Shizuku-based actions call hidden framework APIs
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            HiddenApiBypass.addHiddenApiExemptions("L")
+        }
     }
 
     override fun onTerminate() {

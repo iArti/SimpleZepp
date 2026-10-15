@@ -21,7 +21,7 @@ object AnalyticsLogger {
             Logger.writeLine(Log.INFO, "EVENT | $eventName$append")
         } else {
             // NOTE: Firebase Analytics only supports eventName with alphanumeric characters and underscores
-            analytics.logEvent(eventName.replace("[^a-zA-Z0-9]".toRegex(), "_"), properties)
+            runCatching { analytics.logEvent(eventName.replace("[^a-zA-Z0-9]".toRegex(), "_"), properties) }
         }
     }
 
@@ -30,7 +30,7 @@ object AnalyticsLogger {
         @Size(min = 1L, max = 24L) property: String,
         @Size(max = 36L) value: String?
     ) {
-        analytics.setUserProperty(property, value)
+        runCatching { analytics.setUserProperty(property, value) }
     }
 
     @JvmStatic
@@ -38,7 +38,7 @@ object AnalyticsLogger {
         @Size(min = 1L, max = 24L) property: String,
         @Size(max = 36L) value: Boolean
     ) {
-        analytics.setUserProperty(property, value.toString())
+        runCatching { analytics.setUserProperty(property, value.toString()) }
     }
 
     @JvmStatic
@@ -46,6 +46,6 @@ object AnalyticsLogger {
         @Size(min = 1L, max = 24L) property: String,
         @Size(max = 36L) value: Number
     ) {
-        analytics.setUserProperty(property, value.toString())
+        runCatching { analytics.setUserProperty(property, value.toString()) }
     }
 }

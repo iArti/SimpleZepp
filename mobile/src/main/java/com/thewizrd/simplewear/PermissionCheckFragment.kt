@@ -42,7 +42,9 @@ import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.thewizrd.shared_resources.helpers.WearSettingsHelper
+import com.thewizrd.wearsettings.shizuku.ShizukuState
+import com.thewizrd.wearsettings.shizuku.ShizukuUtils
+import rikka.shizuku.Shizuku
 import com.thewizrd.shared_resources.helpers.WearableHelper
 import com.thewizrd.shared_resources.lifecycle.LifecycleAwareFragment
 import com.thewizrd.shared_resources.tasks.delayLaunch
@@ -70,6 +72,7 @@ import java.util.regex.Pattern
 
 class PermissionCheckFragment : LifecycleAwareFragment() {
     companion object {
+        private const val SHIZUKU_REQCODE = 0x5A
         private const val TAG = "PermissionCheckFragment"
 
         private const val CORNERS_FULL = 0
@@ -87,6 +90,7 @@ class PermissionCheckFragment : LifecycleAwareFragment() {
     private lateinit var requestBtResultLauncher: ActivityResultLauncher<Intent>
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        Shizuku.addRequestPermissionResultListener(shizukuResultListener)
         super.onCreate(savedInstanceState)
 
         permissionRequestLauncher =
@@ -275,8 +279,14 @@ class PermissionCheckFragment : LifecycleAwareFragment() {
         binding.companionPairPref.setOnClickListener {
             startDevicePairing()
         }
-        binding.companionPairPref.visibility =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) View.VISIBLE else View.GONE
+        // Zepp OS fork: no Wear OS pairing, media / call bridging, or separate Helper app
+        listOf(
+            binding.companionPairPref,
+            binding.notiflistenerPref,
+            binding.callcontrolPref,
+            binding.bridgeMediaPref,
+            binding.bridgeCallsPref,
+        ).forEach { it.visibility = View.GONE }
 
         binding.notiflistenerPref.setOnClickListener {
             if (!NotificationListener.isEnabled(requireContext())) {
@@ -367,42 +377,54 @@ class PermissionCheckFragment : LifecycleAwareFragment() {
             binding.bridgeMediaToggle.toggle()
         }
 
+        // Zepp OS fork: the Helper is built in; this row now grants it Shizuku access
+        binding.wearsettingsPrefTitle.setText(R.string.permission_title_shizuku)
         binding.wearsettingsPref.setOnClickListener {
-            if (!WearSettingsHelper.isWearSettingsInstalled() || !WearSettingsHelper.isWearSettingsUpToDate()) {
-                val i = Intent(Intent.ACTION_VIEW).apply {
-                    data = getString(R.string.url_wearsettings_helper).toUri()
-                }
-                if (i.resolveActivity(requireContext().packageManager) != null) {
-                    startActivity(i)
-                } else {
-                    Toast.makeText(requireContext(), "Browser not available", Toast.LENGTH_SHORT)
-                        .show()
-                }
-            } else {
-                WearSettingsHelper.launchWearSettings()
-            }
-        }
+            runCatching {
+                when (ShizukuUtils.getShizukuState(requireContext())) {
+                    ShizukuState.RUNNING -> { /* no-op */
+                    }
 
-        binding.systemsettingsPref.setOnClickListener {
-            val ctx = it.context.applicationContext
-            if (!PhoneStatusHelper.isWriteSystemSettingsPermissionEnabled(ctx)) {
-                runCatching {
-                    startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS).apply {
-                        data = "package:${ctx.packageName}".toUri()
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                    })
+                    ShizukuState.NOT_INSTALLED -> {
+                        MaterialAlertDialogBuilder(requireContext())
+                            .setTitle(R.string.permission_title_shizuku)
+                            .setMessage(R.string.message_shizuku_alert)
+                            .setPositiveButton(android.R.string.ok) { d, _ ->
+                                ShizukuUtils.openPlayStoreListing(requireContext())
+                                d.dismiss()
+                            }
+                            .setNegativeButton(android.R.string.cancel) { d, _ -> d.dismiss() }
+                            .show()
+                    }
+
+                    ShizukuState.NOT_RUNNING -> {
+                        ShizukuUtils.startShizukuActivity(requireContext())
+                    }
+
+                    ShizukuState.PERMISSION_DENIED -> {
+                        if (Shizuku.shouldShowRequestPermissionRationale()) {
+                            Toast.makeText(
+                                requireContext(),
+                                R.string.message_shizuku_disabled,
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } else {
+                            ShizukuUtils.requestPermission(this, SHIZUKU_REQCODE)
+                        }
+                    }
                 }
+            }.onFailure {
+                Logger.writeLine(Log.ERROR, it)
             }
         }
 
         binding.notifPref.setOnClickListener {
-            val ctx = it.context.applicationContext
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && ContextCompat.checkSelfPermission(
-                    ctx,
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) == PackageManager.PERMISSION_DENIED
-            ) {
-                permissionRequestLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+            // Zepp OS fork targets SDK 28: the runtime prompt is unavailable, open the settings.
+            // Notifications are required: the watch pairing request is a notification.
+            runCatching {
+                startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                    putExtra(Settings.EXTRA_APP_PACKAGE, requireContext().packageName)
+                })
             }
         }
         binding.notifPref.isVisible = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
@@ -612,10 +634,7 @@ class PermissionCheckFragment : LifecycleAwareFragment() {
             com.thewizrd.simplewear.preferences.Settings.setBridgeCallsEnabled(false)
         }
 
-        updateWearSettingsHelperPref(
-            WearSettingsHelper.isWearSettingsInstalled(),
-            WearSettingsHelper.isWearSettingsUpToDate()
-        )
+        updateShizukuPref(ShizukuUtils.getShizukuState(requireContext()))
         updateSystemSettingsPref(
             PhoneStatusHelper.isWriteSystemSettingsPermissionEnabled(
                 requireContext()
@@ -704,29 +723,31 @@ class PermissionCheckFragment : LifecycleAwareFragment() {
         )
     }
 
-    private fun updateWearSettingsHelperPref(installed: Boolean, upToDate: Boolean) {
+    private fun updateShizukuPref(state: ShizukuState) {
         binding.wearsettingsPrefSummary.setText(
-            if (installed) {
-                if (upToDate) {
-                    R.string.preference_summary_wearsettings_installed
-                } else {
-                    R.string.preference_summary_wearsettings_outdated
-                }
-            } else {
-                R.string.preference_summary_wearsettings_notinstalled
+            when (state) {
+                ShizukuState.NOT_INSTALLED -> R.string.message_shizuku_not_installed
+                ShizukuState.NOT_RUNNING -> R.string.message_shizuku_not_running
+                ShizukuState.PERMISSION_DENIED -> R.string.message_shizuku_disabled
+                ShizukuState.RUNNING -> R.string.message_shizuku_running
             }
         )
         binding.wearsettingsPrefSummary.setTextColor(
-            if (installed) {
-                if (upToDate) {
-                    getTextColor(binding.wearsettingsPrefSummary.context, true)
-                } else {
-                    Color.argb(0xFF, 0xFF, 0xA5, 0)
-                }
-            } else {
-                getTextColor(binding.wearsettingsPrefSummary.context, false)
-            }
+            getTextColor(binding.wearsettingsPrefSummary.context, state == ShizukuState.RUNNING)
         )
+    }
+
+    private val shizukuResultListener = Shizuku.OnRequestPermissionResultListener { requestCode, _ ->
+        if (requestCode == SHIZUKU_REQCODE) {
+            lifecycleScope.launch {
+                updateShizukuPref(ShizukuUtils.getShizukuState(requireContext()))
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        Shizuku.removeRequestPermissionResultListener(shizukuResultListener)
+        super.onDestroy()
     }
 
     private fun updateSystemSettingsPref(enabled: Boolean) {

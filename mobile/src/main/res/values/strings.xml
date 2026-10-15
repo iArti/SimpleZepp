@@ -73,4 +73,14 @@
     <string name="permission_exact_alarms_disabled">Schedule action permission disabled</string>
     <string name="prompt_no_actions_scheduled">No actions scheduled</string>
 
+
+    <!-- Zepp OS bridge -->
+    <string name="zepp_bridge_channel">Zepp OS bridge</string>
+    <string name="zepp_bridge_title">SimpleZepp</string>
+    <string name="zepp_bridge_running">Waiting for the watch</string>
+    <string name="zepp_bridge_connected">Watch connected</string>
+    <string name="zepp_bridge_pair_title">Connect watch?</string>
+    <string name="zepp_bridge_pair_text">%1$s wants to control this phone</string>
+    <string name="zepp_bridge_pair_allow">Allow</string>
+    <string name="zepp_bridge_pair_deny">Deny</string>
 </resources>

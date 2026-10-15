@@ -1,14 +1,17 @@
-apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
-apply plugin: 'kotlin-kapt'
-apply plugin: 'com.google.gms.google-services'
-apply plugin: 'com.google.firebase.crashlytics'
+plugins {
+    id('com.android.application')
+    id('kotlin-android')
+    id('kotlin-kapt')
+    // Helper code (wearsettings) uses hidden APIs through Refine
+    id('dev.rikka.tools.refine') version libs.versions.refine.version
+}
 
 android {
     compileSdk = libs.versions.compileSdkVersion.get().toInteger()
 
     defaultConfig {
-        applicationId "com.thewizrd.simplewear"
+        // Zepp OS fork: own package so it can live next to the official app
+        applicationId "dev.iarti.simplewear"
 
         testApplicationId "com.thewizrd.simpleweather.test"
         // Specifies the fully-qualified class name of the test instrumentation runner.
@@ -19,7 +22,10 @@ android {
         testInstrumentationRunnerArguments clearPackageData: 'true'
 
         minSdkVersion libs.versions.minSdkVersion.get().toInteger()
-        targetSdkVersion libs.versions.targetSdkVersion.get().toInteger()
+        // Zepp OS fork: sideloaded for personal use. targetSdk 28 keeps the legacy toggle APIs
+        // (Wi-Fi, Bluetooth, ...) that SimpleWear otherwise delegates to the separate Helper app
+        //noinspection ExpiredTargetSdkVersion
+        targetSdkVersion 28
         // NOTE: Version Code Format [TargetSDK, Version Name, Build Number, Variant Code (Android: 0, WearOS: 1)]
         // NOTE: update SUPPORTED_VERSION_CODE if needed
         versionCode 361917020
@@ -30,7 +36,6 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix ".debug"
             debuggable true
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
@@ -41,6 +46,17 @@ android {
             crunchPngs true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
+    }
+
+    sourceSets {
+        main {
+            // Built-in Helper: the wearsettings action code, synced by syncHelperSources
+            java.srcDir layout.buildDirectory.dir('generated/helper-src')
+        }
+    }
+
+    lint {
+        disable 'ExpiredTargetSdkVersion'
     }
 
     buildFeatures {
@@ -95,10 +111,6 @@ dependencies {
     implementation libs.play.services.wearable
     implementation libs.app.update.ktx
 
-    implementation platform(libs.firebase.bom)
-    implementation libs.firebase.analytics
-    implementation libs.firebase.crashlytics
-    implementation libs.firebase.config
 
     implementation libs.appcompat
     implementation libs.constraintlayout
@@ -110,4 +122,28 @@ dependencies {
     implementation libs.timber
     implementation libs.gson
     implementation libs.dexmaker
+    // came transitively with Firebase upstream
+    implementation "androidx.localbroadcastmanager:localbroadcastmanager:1.1.0"
+
+    // Built-in Helper (wearsettings): root, Shizuku, hidden APIs
+    compileOnly project(':hidden-api')
+    implementation libs.libsu.core
+    implementation libs.shizuki.api
+    implementation libs.shizuki.provider
+    implementation libs.refine.runtime
+    implementation libs.hiddenapibypass
 }
+
+apply from: rootProject.file("signing.gradle")
+
+// Built-in Helper: reuse wearsettings' action implementations as-is (without its UI and service)
+def syncHelperSources = tasks.register('syncHelperSources', Sync) {
+    from('../wearsettings/src/main/java') {
+        include 'com/thewizrd/wearsettings/actions/**'
+        include 'com/thewizrd/wearsettings/root/**'
+        include 'com/thewizrd/wearsettings/shizuku/**'
+        include 'com/thewizrd/wearsettings/Settings.kt'
+    }
+    into layout.buildDirectory.dir('generated/helper-src')
+}
+preBuild.dependsOn syncHelperSources

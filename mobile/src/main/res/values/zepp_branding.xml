@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Zepp OS fork branding: overrides shared_resources so it is not mistaken for SimpleWear -->
+<resources>
+    <string name="app_name" translatable="false">SimpleZepp</string>
+    <color name="ic_launcher_background">#3B1F5E</color>
+
+    <!-- Built-in Helper: Shizuku row (strings from wearsettings) -->
+    <string name="permission_title_shizuku" translatable="false">Shizuku</string>
+    <string name="message_shizuku_disabled">Shizuku permission disabled</string>
+    <string name="message_shizuku_not_installed">Shizuku not installed</string>
+    <string name="message_shizuku_not_running">Shizuku service not running</string>
+    <string name="message_shizuku_running">Shizuku service enabled</string>
+    <string name="message_shizuku_alert">Shizuku can be used as an option to provide system permissions to SimpleZepp for non-root devices. As this is a third-party app, please use at your own discretion.
+        Please note that the Shizuku service will need to be manually restarted every time on boot.</string>
+</resources>
