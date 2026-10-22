@@ -2,6 +2,8 @@ import { BasePage } from "@zeppos/zml/base-page";
 import { createWidget, widget, event, prop, align, getTextLayout } from "@zos/ui";
 import { px } from "@zos/utils";
 import { push } from "@zos/router";
+import { scrollTo } from "@zos/page";
+import { onKey, offKey, KEY_UP, KEY_DOWN, KEY_SELECT, KEY_EVENT_CLICK } from "@zos/interaction";
 import { W, MINT, GRAY, RED, TILE_OFF, TILE_ON, TILE_BUSY, text, roundButton, errorText, actionErrorText } from "../../shared/ui";
 import { PATH, RINGER, toggleAction, multiChoiceAction, normalAction } from "../../shared/protocol";
 import { send, sendJson, subscribe, unsubscribe, dispatch, keepAlive } from "../../shared/link";
@@ -39,6 +41,11 @@ const BATT_X0 = 200;
 const ROW_Y = 180;
 const ROW_STEP = 140;
 const D = 100;
+// keyboard focus ring around the selected tile
+const RING_GAP = 7;
+const RING_W = 3;
+const RING_COLOR = 0xcfc3ee;
+const CONTENT_H = ROW_Y + Math.ceil(TILES.length / 3) * ROW_STEP + 80;
 
 Page(
   BasePage({
@@ -62,6 +69,8 @@ Page(
         // room to scroll the last row above the round bezel
         text(0, ROW_Y + Math.ceil(TILES.length / 3) * ROW_STEP, W, 80, "", {});
 
+        this.focus = -1; // no ring until Up/Down is pressed
+        this.bindKeys();
         this.connect();
       } catch (e) {
         text(40, 180, W - 80, 120, "build: " + e, { color: RED, wrap: true, size: 22 });
@@ -70,13 +79,46 @@ Page(
 
     // root page: destroyed when the app closes -> let the app-side stop polling right away
     onDestroy() {
+      offKey();
       if (this.stopKeepAlive) this.stopKeepAlive();
       unsubscribe(this);
     },
 
     onResume() {
+      // sub pages take over the buttons (onKey is one listener per system)
+      this.bindKeys();
       // back from a sub page: refresh everything (the sub page may have changed volume etc.)
       if (this.paired) this.start();
+    },
+
+    bindKeys() {
+      onKey({
+        callback: (key, keyEvent) => {
+          if (keyEvent !== KEY_EVENT_CLICK) return false;
+          if (key === KEY_DOWN) this.moveFocus(1);
+          else if (key === KEY_UP) this.moveFocus(-1);
+          else if (key === KEY_SELECT && this.focus >= 0) this.tap(TILES[this.focus]);
+          else return false;
+          return true;
+        },
+      });
+    },
+
+    moveFocus(dir) {
+      const n = TILES.length;
+      this.focus = this.focus < 0 ? (dir > 0 ? 0 : n - 1) : (this.focus + dir + n) % n;
+      const cx = COL_X[this.focus % 3];
+      const cy = ROW_Y + Math.floor(this.focus / 3) * ROW_STEP;
+      const r = D / 2 + RING_GAP;
+      const geom = {
+        x: px(cx - r), y: px(cy - r), w: px(r * 2), h: px(r * 2),
+        start_angle: 0, end_angle: 360, color: RING_COLOR, line_width: px(RING_W),
+      };
+      if (this.ring) this.ring.setProperty(prop.MORE, geom);
+      else this.ring = createWidget(widget.ARC, geom);
+      // keep the selected row in the middle of the round screen
+      const top = Math.min(Math.max(0, cy - W / 2), CONTENT_H - W);
+      scrollTo({ y: -px(top), anim_duration: 200 });
     },
 
     tile(t, cx, cy) {
