@@ -8,6 +8,8 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.telephony.PhoneStateListener
 import android.telephony.SignalStrength
 import android.telephony.TelephonyManager
@@ -25,6 +27,7 @@ class SignalMonitor(private val context: Context) {
         const val PATH = "/status/signal"
         private const val TAG = "SignalMonitor"
         private const val LEVELS = 5
+        private const val IDLE_CHECK_MS = 35_000L
     }
 
     private val wifiManager = context.applicationContext.getSystemService(WifiManager::class.java)
@@ -54,8 +57,30 @@ class SignalMonitor(private val context: Context) {
         }
     }
 
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var listening = false
+
+    // RSSI and signal strength change constantly: listen only while the watch is polling,
+    // otherwise every change would wake the phone all night
+    private val idleCheck = object : Runnable {
+        override fun run() {
+            if (ZeppBridge.isConnected()) mainHandler.postDelayed(this, IDLE_CHECK_MS) else stop()
+        }
+    }
+
+    /** Called on every watch poll; cheap when already listening */
+    fun ensureListening() {
+        mainHandler.post {
+            if (listening) return@post
+            start()
+            mainHandler.postDelayed(idleCheck, IDLE_CHECK_MS)
+        }
+    }
+
     @Suppress("DEPRECATION")
-    fun start() {
+    private fun start() {
+        listening = true
+        Log.d(TAG, "listening")
         context.registerReceiver(receiver, IntentFilter().apply {
             addAction(WifiManager.RSSI_CHANGED_ACTION)
             addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION)
@@ -69,6 +94,10 @@ class SignalMonitor(private val context: Context) {
 
     @Suppress("DEPRECATION")
     fun stop() {
+        mainHandler.removeCallbacks(idleCheck)
+        if (!listening) return
+        listening = false
+        Log.d(TAG, "stopped (watch not polling)")
         runCatching { context.unregisterReceiver(receiver) }
         runCatching { telephonyManager?.listen(phoneListener, PhoneStateListener.LISTEN_NONE) }
     }

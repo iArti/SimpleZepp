@@ -4,7 +4,7 @@ import { px } from "@zos/utils";
 import { onKey, KEY_UP, KEY_DOWN, KEY_EVENT_CLICK } from "@zos/interaction";
 import { W, MINT, GRAY, RED, TILE_ON, text, roundButton, errorText } from "../../shared/ui";
 import { PATH, STREAMS, ACTION_VALUE, intBytes } from "../../shared/protocol";
-import { send, sendJson, subscribe, dispatch } from "../../shared/link";
+import { send, sendJson, subscribe, dispatch, keepAlive } from "../../shared/link";
 
 const STREAM_LABEL = { MUSIC: "Медиа", RINGTONE: "Звонок", VOICE_CALL: "Разговор", ALARM: "Будильник" };
 const C = W / 2;
@@ -22,6 +22,7 @@ Page(
     },
 
     build() {
+      this.stopKeepAlive = keepAlive(this);
       try {
         this.streamIdx = 0;
         this.value = null; // {cur, min, max}
@@ -63,6 +64,10 @@ Page(
       } catch (e) {
         text(40, 180, W - 80, 120, "build: " + e, { color: RED, wrap: true, size: 22 });
       }
+    },
+
+    onDestroy() {
+      if (this.stopKeepAlive) this.stopKeepAlive();
     },
 
     setStatus(value, color = GRAY) {

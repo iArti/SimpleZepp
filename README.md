@@ -55,7 +55,7 @@ Code: `mobile/…/zepp/` (bridge), `zepp/` (watch app, app-side, shortcut card).
 
 ### 1. Phone app
 
-**Download:** [SimpleZepp-0.1.0.apk](https://github.com/iArti/SimpleZepp/releases/download/v0.1.0/SimpleZepp-0.1.0.apk)
+**Download:** [SimpleZepp-0.1.1.apk](https://github.com/iArti/SimpleZepp/releases/download/v0.1.1/SimpleZepp-0.1.1.apk)
 from [Releases](https://github.com/iArti/SimpleZepp/releases/latest) (signed with the author's key) and install it,
 or build it yourself. An APK signed with a different key can't update it: uninstall first.
 

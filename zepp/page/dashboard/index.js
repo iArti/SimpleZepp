@@ -4,7 +4,7 @@ import { px } from "@zos/utils";
 import { push } from "@zos/router";
 import { W, MINT, GRAY, RED, TILE_OFF, TILE_ON, TILE_BUSY, text, roundButton, errorText, actionErrorText } from "../../shared/ui";
 import { PATH, RINGER, toggleAction, multiChoiceAction, normalAction } from "../../shared/protocol";
-import { send, sendJson, subscribe, dispatch } from "../../shared/link";
+import { send, sendJson, subscribe, unsubscribe, dispatch, keepAlive } from "../../shared/link";
 import { saveStatus, statusPatch, batteryIcon, wifiIconFor, cellIconFor, loadStatus } from "../../shared/status";
 
 const ICON = (name) => "icons/" + name + ".png";
@@ -43,6 +43,7 @@ const D = 100;
 Page(
   BasePage({
     build() {
+      this.stopKeepAlive = keepAlive(this);
       try {
         this.state = {}; // actionType -> last Action from the phone
         this.tiles = {};
@@ -65,6 +66,12 @@ Page(
       } catch (e) {
         text(40, 180, W - 80, 120, "build: " + e, { color: RED, wrap: true, size: 22 });
       }
+    },
+
+    // root page: destroyed when the app closes -> let the app-side stop polling right away
+    onDestroy() {
+      if (this.stopKeepAlive) this.stopKeepAlive();
+      unsubscribe(this);
     },
 
     onResume() {

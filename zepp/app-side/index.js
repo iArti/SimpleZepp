@@ -4,8 +4,9 @@ import { BaseSideService } from "@zeppos/zml/base-side";
 const BASE = "http://127.0.0.1:47821";
 // Zepp's fetch gives up after ~10 s, the phone answers long polls within 8 s
 const POLL_WAIT_MS = 7000;
-// Stop polling when the watch has been quiet this long (app closed without saying so)
-const IDLE_STOP_MS = 5 * 60 * 1000;
+// Stop polling when the watch has been quiet this long. Visible pages and the shortcut card send a
+// keepalive every 30 s; their timers stop with the screen, so polling (and the phone) can sleep.
+const IDLE_STOP_MS = 60 * 1000;
 const PAIR_TIMEOUT_MS = 90 * 1000;
 
 const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -152,6 +153,11 @@ AppSideService(
             break;
           }
           this.pollLoop();
+          job = Promise.resolve("ok");
+          break;
+        case "keepalive":
+          // the page is still on screen: make sure polling runs (it may have idled out)
+          if (getToken()) this.pollLoop();
           job = Promise.resolve("ok");
           break;
         case "unsubscribe":

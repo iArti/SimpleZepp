@@ -103,7 +103,7 @@ class ZeppBridgeService : Service() {
         super.onCreate()
         wearMgr = WearableManager(this)
         handler = WearMessageHandler(this, wearMgr)
-        signal = SignalMonitor(this).also { it.start() }
+        signal = SignalMonitor(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -273,6 +273,7 @@ class ZeppBridgeService : Service() {
             req.method == "GET" && req.path == "/events" -> {
                 val wait = req.query["wait"]?.toLongOrNull() ?: ZeppBridge.MAX_WAIT_MS
                 val wasConnected = ZeppBridge.isConnected()
+                signal.ensureListening()
                 val messages = ZeppBridge.take(wait)
                 if (!wasConnected) updateNotification()
                 messages.forEach { (p, d) ->

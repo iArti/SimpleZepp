@@ -3,7 +3,7 @@ import { createWidget, widget, event, prop } from "@zos/ui";
 import { px } from "@zos/utils";
 import { W, GRAY, RED, MINT, text, errorText } from "../../shared/ui";
 import { PATH } from "../../shared/protocol";
-import { send, sendJson, subscribe, dispatch } from "../../shared/link";
+import { send, sendJson, subscribe, dispatch, keepAlive } from "../../shared/link";
 
 const TOP = 110;
 const ROW_H = 76;
@@ -12,6 +12,7 @@ const MAX_APPS = 150;
 Page(
   BasePage({
     build() {
+      this.stopKeepAlive = keepAlive(this);
       try {
         text(W / 2 - 120, 40, 240, 44, "Приложения", { size: 28, color: GRAY });
         this.status = text(60, TOP, W - 120, 40, "Загрузка…", { size: 20, color: GRAY });
@@ -22,6 +23,10 @@ Page(
       } catch (e) {
         text(40, 180, W - 80, 120, "build: " + e, { color: RED, wrap: true, size: 22 });
       }
+    },
+
+    onDestroy() {
+      if (this.stopKeepAlive) this.stopKeepAlive();
     },
 
     setStatus(value, color = GRAY) {

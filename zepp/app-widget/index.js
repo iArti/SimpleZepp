@@ -94,10 +94,20 @@ const options = {
     } catch (e) {
       console.log("card offKey failed", e);
     }
+    // card left the screen: stop the phone polling
+    if (this.stopKeepAlive) this.stopKeepAlive();
+    this.stopKeepAlive = null;
+    if (this.request) this.request({ method: "unsubscribe" }, { timeout: 5000 }).catch(() => {});
   },
 
   refresh() {
     if (!this.request) return; // zml messaging unavailable in this context
+    if (!this.stopKeepAlive) {
+      const timer = setInterval(() => {
+        this.request({ method: "keepalive" }, { timeout: 5000 }).catch(() => {});
+      }, 30 * 1000);
+      this.stopKeepAlive = () => clearInterval(timer);
+    }
     this.request({ method: "subscribe" }, { timeout: 12000 })
       .then(() => this.request({ method: "send", params: { path: "/app_state", text: "FOREGROUND" } }, { timeout: 12000 }))
       .catch((e) => console.log("card refresh failed", e));

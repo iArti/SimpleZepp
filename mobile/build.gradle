@@ -28,8 +28,8 @@ android {
         targetSdkVersion 28
         // NOTE: Version Code Format [TargetSDK, Version Name, Build Number, Variant Code (Android: 0, WearOS: 1)]
         // NOTE: update SUPPORTED_VERSION_CODE if needed
-        versionCode 361917020
-        versionName "0.1.0" // SimpleZepp release (versionCode kept from upstream so installs update)
+        versionCode 361917021
+        versionName "0.1.1" // SimpleZepp release (versionCode continues upstream's so installs update)
 
         vectorDrawables.useSupportLibrary = true
     }

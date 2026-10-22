@@ -12,6 +12,21 @@ export function subscribe(page) {
   return page.request({ method: "subscribe" }, { timeout: 12000 });
 }
 
+export function unsubscribe(page) {
+  return page.request({ method: "unsubscribe" }, { timeout: 5000 }).catch(() => {});
+}
+
+// While a page / the card is on screen the app-side keeps polling the phone; without these
+// keepalives it stops after a minute. Returns a function that stops them.
+const KEEPALIVE_MS = 30 * 1000;
+
+export function keepAlive(page) {
+  const timer = setInterval(() => {
+    page.request({ method: "keepalive" }, { timeout: 5000 }).catch(() => {});
+  }, KEEPALIVE_MS);
+  return () => clearInterval(timer);
+}
+
 // app-side pushes {type: "messages", msgs: [{path, text?, bytes?, apps?}]} and {type: "link", ok, error}
 export function dispatch(data, handlers) {
   if (!data) return;
