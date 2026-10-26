@@ -79,6 +79,7 @@
     <string name="zepp_bridge_title">SimpleZepp</string>
     <string name="zepp_bridge_running">Waiting for the watch</string>
     <string name="zepp_bridge_connected">Watch connected</string>
+    <string name="zepp_bridge_media">media: %1$s</string>
     <string name="zepp_bridge_pair_title">Connect watch?</string>
     <string name="zepp_bridge_pair_text">%1$s wants to control this phone</string>
     <string name="zepp_bridge_pair_allow">Allow</string>

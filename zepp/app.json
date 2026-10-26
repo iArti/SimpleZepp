@@ -13,6 +13,7 @@
     "description": "Control your Android phone from the watch (SimpleWear port)"
   },
   "permissions": [
+    "data:os.device.info",
     "device:os.local_storage"
   ],
   "runtime": {
@@ -29,7 +30,11 @@
           "pages": [
             "page/dashboard/index",
             "page/value/index",
-            "page/apps/index"
+            "page/apps/index",
+            "page/media/index",
+            "page/mqueue/index",
+            "page/mactions/index",
+            "page/players/index"
           ]
         },
         "app-side": {

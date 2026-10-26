@@ -2,6 +2,10 @@ package com.thewizrd.simplewear.wearable
 
 import android.content.Context
 import android.content.Intent
+import com.thewizrd.shared_resources.helpers.MediaHelper
+import com.thewizrd.simplewear.media.MediaAppControllerUtils
+import com.thewizrd.simplewear.media.MediaControllerService
+import com.thewizrd.simplewear.services.NotificationListener
 import android.os.Build
 import androidx.core.util.Pair
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
@@ -93,6 +97,95 @@ class WearMessageHandler(private val ctx: Context, private val mWearMgr: Wearabl
             val pkgName = pair?.first.toString()
             val activityName = pair?.second.toString()
             mWearMgr.launchApp(sourceNodeId, pkgName, activityName)
+        } else if (path.startsWith(MediaHelper.MusicPlayersPath)) {
+            if (NotificationListener.isEnabled(ctx)) {
+                mWearMgr.sendSupportedMusicPlayers(sourceNodeId)
+                mWearMgr.sendMessage(
+                    sourceNodeId, path,
+                    ActionStatus.SUCCESS.name.stringToBytes()
+                )
+            } else {
+                mWearMgr.sendMessage(
+                    sourceNodeId, path,
+                    ActionStatus.PERMISSION_DENIED.name.stringToBytes()
+                )
+            }
+        } else if (path == MediaHelper.OpenMusicPlayerPath) {
+            val jsonData = data.bytesToString()
+            val pair = JSONParser.deserializer(jsonData, Pair::class.java)
+            val pkgName = pair?.first.toString()
+            val activityName = pair?.second.toString()
+            mWearMgr.startMusicPlayer(sourceNodeId, pkgName, activityName, false)
+        } else if (path == MediaHelper.PlayCommandPath) {
+            val jsonData = data.bytesToString()
+            val pair = JSONParser.deserializer(jsonData, Pair::class.java)
+            val pkgName = pair?.first.toString()
+            val activityName = pair?.second.toString()
+            mWearMgr.startMusicPlayer(sourceNodeId, pkgName, activityName, true)
+        } else if (path == MediaHelper.MediaPlayerConnectPath) {
+            if (NotificationListener.isEnabled(ctx)) {
+                val isAutoLaunch =
+                    data.size == 1 && data.bytesToBool()
+                val packageName = data.bytesToString()
+
+                MediaControllerService.enqueueWork(
+                    ctx, Intent(ctx, MediaControllerService::class.java)
+                        .setAction(MediaControllerService.ACTION_CONNECTCONTROLLER).apply {
+                            if (isAutoLaunch) {
+                                putExtra(MediaControllerService.EXTRA_AUTOLAUNCH, true)
+                            } else {
+                                putExtra(MediaControllerService.EXTRA_PACKAGENAME, packageName)
+                            }
+                        }
+                )
+
+                mWearMgr.sendMessage(
+                    sourceNodeId, path,
+                    ActionStatus.SUCCESS.name.stringToBytes()
+                )
+            } else {
+                mWearMgr.sendMessage(
+                    sourceNodeId, path,
+                    ActionStatus.PERMISSION_DENIED.name.stringToBytes()
+                )
+            }
+        } else if (path == MediaHelper.MediaPlayerDisconnectPath) {
+            MediaControllerService.enqueueWork(
+                ctx, Intent(ctx, MediaControllerService::class.java)
+                    .setAction(MediaControllerService.ACTION_DISCONNECTCONTROLLER)
+                    .putExtra(
+                        MediaControllerService.EXTRA_FORCEDISCONNECT,
+                        !Settings.isBridgeMediaEnabled()
+                    )
+            )
+        } else if (path == MediaHelper.MediaPlayerAutoLaunchPath) {
+            if (NotificationListener.isEnabled(ctx)) {
+                val status = PhoneStatusHelper.isMusicActive(ctx, false)
+
+                if (status == ActionStatus.SUCCESS || MediaAppControllerUtils.isMediaActive(
+                        ctx,
+                        NotificationListener.getComponentName(ctx)
+                    )
+                ) {
+                    MediaControllerService.enqueueWork(
+                        ctx, Intent(ctx, MediaControllerService::class.java)
+                            .setAction(MediaControllerService.ACTION_CONNECTCONTROLLER)
+                            .putExtra(MediaControllerService.EXTRA_AUTOLAUNCH, true)
+                    )
+
+                    mWearMgr.sendMessage(
+                        sourceNodeId,
+                        MediaHelper.MediaPlayerAutoLaunchPath,
+                        ActionStatus.SUCCESS.name.stringToBytes()
+                    )
+                }
+            } else {
+                mWearMgr.sendMessage(
+                    sourceNodeId,
+                    MediaHelper.MediaPlayerAutoLaunchPath,
+                    ActionStatus.PERMISSION_DENIED.name.stringToBytes()
+                )
+            }
         } else if (path == WearableHelper.VersionPath) {
             mWearMgr.sendMessage(
                 sourceNodeId, path,

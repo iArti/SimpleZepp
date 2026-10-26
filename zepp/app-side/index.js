@@ -73,6 +73,80 @@ async function http(path, { method = "GET", body } = {}) {
   return parseBody(res.body);
 }
 
+const noIcon = ({ key_icon, icon, ...rest }) => rest;
+const STRIP_ICONS = {
+  "/media/app/info": (app) => (app ? noIcon(app) : app),
+  "/media/actions": (d) => ({ ...d, actions: (d.actions || []).map(noIcon) }),
+  "/music-players": (d) => ({ ...d, musicPlayers: (d.musicPlayers || []).map(noIcon) }),
+  "/media/queueitems": (d) => ({ ...d, queueItems: (d.queueItems || []).map(noIcon) }),
+};
+
+/* Cover art: the phone serves the current cover at /media/art; the watch gets it as a file.
+   Same pipeline as Spotify Remote: download -> PNG -> TransferFile. */
+
+const COVER_JOB_TIMEOUT_MS = 60000;
+let coverWatchHas = ""; // cover id the watch already shows (it tells us on open)
+let coverJob = null; // id being transferred
+let coverPending = null; // newest id waiting for the current job
+let coverSlot = 0;
+
+function sendCover(id) {
+  if (!id || id === coverWatchHas || id === coverJob) return;
+  if (coverJob) {
+    coverPending = id;
+    return;
+  }
+  coverJob = id;
+  coverSlot = 1 - coverSlot;
+  const name = coverSlot ? "cover_a" : "cover_b";
+  let finished = false;
+  const finish = (state) => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(watchdog);
+    if (state === "transferred") coverWatchHas = id;
+    else console.log("cover failed", id, state);
+    coverJob = null;
+    const next = coverPending;
+    coverPending = null;
+    if (next) sendCover(next);
+  };
+  // A stuck callback must not block covers forever
+  const watchdog = setTimeout(() => finish("timeout"), COVER_JOB_TIMEOUT_MS);
+
+  try {
+    // filePath is relative to data://download
+    const task = network.downloader.downloadFile({
+      url: `${BASE}/media/art?id=${id}&t=${getToken()}`,
+      timeout: 30000,
+      filePath: `${name}.jpg`,
+    });
+    task.onSuccess = (ev) => {
+      if (ev.statusCode && ev.statusCode !== 200) {
+        finish("dl http " + ev.statusCode);
+        return;
+      }
+      image
+        .convert({
+          filePath: ev.filePath || ev.tempFilePath || `data://download/${name}.jpg`,
+          targetFilePath: `data://download/${name}.png`,
+        })
+        .then((result) => {
+          const outbox = transferFile.outbox || transferFile.getOutbox();
+          const file = outbox.enqueueFile(result.targetFilePath, { kind: "cover", coverId: id });
+          file.on("change", (e) => {
+            const state = e.data.readyState;
+            if (state === "transferred" || state === "error" || state === "canceled") finish(state);
+          });
+        })
+        .catch((e) => finish("conv err: " + ((e && e.message) || e)));
+    };
+    task.onFail = (ev) => finish("dl err: " + ev.code + " " + ev.message);
+  } catch (e) {
+    finish("err: " + ((e && e.message) || e));
+  }
+}
+
 // The apps list carries base64 PNG icons; the watch shows names only for now
 function slimMessage(m) {
   if (m.path === "/apps" && m.text) {
@@ -85,6 +159,13 @@ function slimMessage(m) {
       return { path: m.path, apps };
     } catch (e) {
       return { path: m.path, error: "bad_apps" };
+    }
+  }
+  if (STRIP_ICONS[m.path] && m.text) {
+    try {
+      return { path: m.path, text: JSON.stringify(STRIP_ICONS[m.path](JSON.parse(m.text))) };
+    } catch (e) {
+      return { path: m.path, error: "bad_json" };
     }
   }
   const out = { path: m.path };
@@ -109,6 +190,9 @@ AppSideService(
           const r = await http("/events?wait=" + POLL_WAIT_MS);
           failures = 0;
           const msgs = (r.messages || []).map(slimMessage);
+          msgs.forEach((m) => {
+            if (m.path === "/media/playback_state/art" && m.text) sendCover(m.text);
+          });
           if (msgs.length) this.call({ type: "messages", msgs });
         } catch (e) {
           failures++;
@@ -153,6 +237,11 @@ AppSideService(
             break;
           }
           this.pollLoop();
+          job = Promise.resolve("ok");
+          break;
+        case "media_cover":
+          // the watch already shows this cover (kept across app restarts)
+          coverWatchHas = p.have || "";
           job = Promise.resolve("ok");
           break;
         case "keepalive":

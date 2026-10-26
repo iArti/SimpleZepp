@@ -279,10 +279,9 @@ class PermissionCheckFragment : LifecycleAwareFragment() {
         binding.companionPairPref.setOnClickListener {
             startDevicePairing()
         }
-        // Zepp OS fork: no Wear OS pairing, media / call bridging, or separate Helper app
+        // Zepp OS fork: no Wear OS pairing, media / call bridging (notification access stays: media control)
         listOf(
             binding.companionPairPref,
-            binding.notiflistenerPref,
             binding.callcontrolPref,
             binding.bridgeMediaPref,
             binding.bridgeCallsPref,

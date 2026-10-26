@@ -73,6 +73,41 @@ class ZeppBridgeService : Service() {
         private const val TOKEN_HEADER = "x-bridge-token"
         private const val MAX_BODY = 1024 * 1024
 
+        @Volatile
+        private var running = false
+
+        /** One notification for the whole app: watch link + the media player being controlled */
+        fun buildNotification(context: Context): Notification {
+            val nm = context.getSystemService(NotificationManager::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        NOT_CHANNEL_ID,
+                        context.getString(R.string.zepp_bridge_channel),
+                        NotificationManager.IMPORTANCE_LOW
+                    )
+                )
+            }
+            var status = context.getString(
+                if (ZeppBridge.isConnected()) R.string.zepp_bridge_connected else R.string.zepp_bridge_running
+            )
+            ZeppBridge.mediaApp?.let { status += " · " + context.getString(R.string.zepp_bridge_media, it) }
+            return NotificationCompat.Builder(context, NOT_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_settings_phone_24dp)
+                .setContentTitle(context.getString(R.string.zepp_bridge_title))
+                .setContentText(status)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build()
+        }
+
+        /** Re-posts the notification, e.g. when the controlled player changes */
+        fun refreshNotification(context: Context) {
+            if (!running) return
+            context.getSystemService(NotificationManager::class.java).notify(NOT_ID, buildNotification(context))
+        }
+
         fun start(context: Context) {
             runCatching {
                 ContextCompat.startForegroundService(
@@ -134,6 +169,7 @@ class ZeppBridgeService : Service() {
         server = null
         pool?.shutdownNow()
         pool = null
+        running = false
         scope.cancel()
         signal.stop()
         wearMgr.unregister()
@@ -143,25 +179,8 @@ class ZeppBridgeService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun startForegroundCompat() {
-        val nm = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            nm.createNotificationChannel(
-                NotificationChannel(
-                    NOT_CHANNEL_ID,
-                    getString(R.string.zepp_bridge_channel),
-                    NotificationManager.IMPORTANCE_LOW
-                )
-            )
-        }
-        val notif = NotificationCompat.Builder(this, NOT_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_settings_phone_24dp)
-            .setContentTitle(getString(R.string.zepp_bridge_title))
-            .setContentText(
-                getString(if (ZeppBridge.isConnected()) R.string.zepp_bridge_connected else R.string.zepp_bridge_running)
-            )
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
+        running = true
+        val notif = buildNotification(this)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(NOT_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
@@ -222,6 +241,11 @@ class ZeppBridgeService : Service() {
             client.use { sock ->
                 sock.soTimeout = 15000
                 val request = readRequest(BufferedInputStream(sock.getInputStream())) ?: return
+                // Cover art is binary; the app-side downloads it with network.downloader
+                if (request.path == "/media/art") {
+                    serveArtwork(request, sock.getOutputStream())
+                    return
+                }
                 val (code, body) = try {
                     route(request)
                 } catch (e: Exception) {
@@ -261,6 +285,8 @@ class ZeppBridgeService : Service() {
                     json.has("text") -> json.getString("text").toByteArray(StandardCharsets.UTF_8)
                     else -> ByteArray(0)
                 }
+                // Media commands go to MediaControllerService, which listens on its own
+                ZeppBridge.dispatch(path, data)
                 // Replies (if any) come back through /events, like Wear OS MessageClient
                 scope.launch {
                     runCatching { handler.handle(path, data, ZeppBridge.NODE_ID) }
@@ -394,8 +420,26 @@ class ZeppBridgeService : Service() {
         return buf.toString("UTF-8")
     }
 
+    // GET /media/art?id=<id>&t=<token>: the downloader can't send headers, so the token is a parameter
+    private fun serveArtwork(req: Request, out: OutputStream) {
+        val token = getToken()
+        if (token == null || (req.query["t"] ?: req.headers[TOKEN_HEADER]) != token) {
+            respond(out, 401, JSONObject().put("error", "unauthorized").toString())
+            return
+        }
+        val art = ZeppBridge.artwork(req.query["id"])
+        if (art == null) {
+            respond(out, 404, JSONObject().put("error", "no_art").toString())
+            return
+        }
+        respond(out, 200, art, "image/jpeg")
+    }
+
     private fun respond(out: OutputStream, code: Int, json: String) {
-        val body = json.toByteArray(StandardCharsets.UTF_8)
+        respond(out, code, json.toByteArray(StandardCharsets.UTF_8), "application/json; charset=utf-8")
+    }
+
+    private fun respond(out: OutputStream, code: Int, body: ByteArray, contentType: String) {
         val reason = when (code) {
             200 -> "OK"
             400 -> "Bad Request"
@@ -404,7 +448,7 @@ class ZeppBridgeService : Service() {
             else -> "Error"
         }
         val head = "HTTP/1.1 $code $reason\r\n" +
-                "Content-Type: application/json; charset=utf-8\r\n" +
+                "Content-Type: $contentType\r\n" +
                 "Content-Length: ${body.size}\r\n" +
                 "Connection: close\r\n\r\n"
         out.write(head.toByteArray(StandardCharsets.US_ASCII))

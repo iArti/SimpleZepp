@@ -13,9 +13,14 @@ A fork of [SimpleWear](https://github.com/SimpleAppProjects/SimpleWear) by Dave 
   Up/Down buttons change the value
 - **App launcher:** start any app on the phone from the watch
 - **Phone battery** level on the main screen
+- **Music:** controls for whatever plays on the phone (Spotify, YouTube Music, any app with a media session),
+  ported from [Spotify Remote](https://github.com/iArti/zepp-better-spotify-remote): cover screensaver
+  (tap = play/pause, double tap left/right = previous/next), progress ring, like (when the player offers it),
+  queue wheel, the player's own actions (shuffle, repeat, radio…, swipe up), choosing the player app, volume.
+  Colors are taken from the player app's icon. A palm over the screen pauses
 - **Shortcut card:** Wi-Fi and cellular signal level, ringer mode and battery at a glance; tap or Select opens the app
 
-Music and call controls from SimpleWear are left out: Zepp OS already has both.
+Call controls from SimpleWear are left out: Zepp OS already has them.
 
 ## How it works
 
@@ -71,6 +76,7 @@ Without `keystore/keystore.properties` the APK is signed with your debug key (se
 Then open **SimpleZepp** on the phone and grant what you need on the permissions screen. Also:
 
 - **Notifications** must be allowed: pairing is confirmed from a notification.
+- **Notification access** is needed for music control (Android only lets such apps see players' media sessions).
 - Exclude the app from battery optimisation. On Honor / Huawei: *Battery → App launch → SimpleZepp →
   manage manually*, enable all three switches.
 - For mobile data, hotspot etc. either grant [Shizuku](https://shizuku.rikka.app/) access in the app or:

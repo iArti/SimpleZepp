@@ -7,12 +7,14 @@ import { onKey, offKey, KEY_UP, KEY_DOWN, KEY_SELECT, KEY_EVENT_CLICK } from "@z
 import { W, MINT, GRAY, RED, TILE_OFF, TILE_ON, TILE_BUSY, text, roundButton, errorText, actionErrorText } from "../../shared/ui";
 import { PATH, RINGER, toggleAction, multiChoiceAction, normalAction } from "../../shared/protocol";
 import { send, sendJson, subscribe, unsubscribe, dispatch, keepAlive } from "../../shared/link";
+import { MEDIA } from "../../shared/media";
 import { saveStatus, statusPatch, batteryIcon, wifiIconFor, cellIconFor, loadStatus } from "../../shared/status";
 
 const ICON = (name) => "icons/" + name + ".png";
 
 // kind: toggle | ringer | normal | page
 const TILES = [
+  { type: "music", label: "Музыка", kind: "page", icon: "music", url: "page/media/index" },
   { type: "wifi", label: "Wi-Fi", kind: "toggle", on: "wifi_on", off: "wifi_off" },
   { type: "bluetooth", label: "Bluetooth", kind: "toggle", on: "bt_on", off: "bt_off" },
   { type: "mobiledata", label: "Моб. данные", kind: "toggle", on: "data_on", off: "data_off" },
@@ -80,6 +82,7 @@ Page(
     // root page: destroyed when the app closes -> let the app-side stop polling right away
     onDestroy() {
       offKey();
+      this.releaseMedia();
       if (this.stopKeepAlive) this.stopKeepAlive();
       unsubscribe(this);
     },
@@ -87,8 +90,17 @@ Page(
     onResume() {
       // sub pages take over the buttons (onKey is one listener per system)
       this.bindKeys();
+      this.releaseMedia();
       // back from a sub page: refresh everything (the sub page may have changed volume etc.)
       if (this.paired) this.start();
+    },
+
+    // Back from the media screens: let SimpleWear drop its media session callbacks
+    releaseMedia() {
+      const g = getApp().globalData;
+      if (!g.mediaActive) return;
+      g.mediaActive = false;
+      send(this, MEDIA.DISCONNECT).catch(() => {});
     },
 
     bindKeys() {

@@ -1,5 +1,6 @@
 import { createWidget, widget, align, text_style, event, prop } from "@zos/ui";
 import { px } from "@zos/utils";
+import { pausePalmScreenOff } from "@zos/display";
 
 export const W = 480; // design width; px() scales to the real screen
 export const MINT = 0x7fe0b0;
@@ -8,6 +9,9 @@ export const RED = 0xff8080;
 export const TILE_OFF = 0x262626;
 export const TILE_ON = 0x5b3a8c;
 export const TILE_BUSY = 0x3f3f3f;
+// media screens (ported from Spotify Remote)
+export const GREEN = 0x1ed760;
+export const DARK = 0x121212;
 
 export function text(x, y, w, h, value, opts = {}) {
   return createWidget(widget.TEXT, {
@@ -20,8 +24,56 @@ export function text(x, y, w, h, value, opts = {}) {
     color: opts.color ?? 0xffffff,
     align_h: opts.alignH ?? align.CENTER_H,
     align_v: align.CENTER_V,
-    text_style: opts.wrap ? text_style.WRAP : text_style.ELLIPSIS,
+    // NONE = marquee scrolling for long single-line text
+    text_style: opts.wrap ? text_style.WRAP : opts.marquee ? text_style.NONE : text_style.ELLIPSIS,
   });
+}
+
+export function setText(w, value) {
+  w.setProperty(prop.TEXT, value);
+}
+
+// Finger movement that still counts as a tap, not a swipe (design px)
+const TAP_SLOP = 24;
+
+// CLICK_UP also fires at the end of a swipe that started on the widget
+// (e.g. swiping between screens over the play button): ignore those
+export function onTap(widgetRef, onClick) {
+  let down = null;
+  widgetRef.addEventListener(event.CLICK_DOWN, (e) => {
+    down = { x: e.x, y: e.y };
+  });
+  widgetRef.addEventListener(event.CLICK_UP, (e) => {
+    const start = down;
+    down = null;
+    if (start && (Math.abs(e.x - start.x) > px(TAP_SLOP) || Math.abs(e.y - start.y) > px(TAP_SLOP))) return;
+    onClick(e);
+  });
+}
+
+// Icon image centered in a larger tap area
+export function iconButton(cx, cy, area, iconSize, src, onClick) {
+  const img = createWidget(widget.IMG, {
+    x: px(cx - area / 2),
+    y: px(cy - area / 2),
+    w: px(area),
+    h: px(area),
+    pos_x: px((area - iconSize) / 2),
+    pos_y: px((area - iconSize) / 2),
+    src,
+  });
+  if (onClick) onTap(img, onClick);
+  return img;
+}
+
+// A palm (or water) over the screen must not turn it off and close the app;
+// the media page turns that into a pause instead
+export function ignorePalm() {
+  try {
+    pausePalmScreenOff({ duration: 0 });
+  } catch (e) {
+    console.log("pausePalmScreenOff failed", e);
+  }
 }
 
 export function statusLine(y, w = 300) {

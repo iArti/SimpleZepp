@@ -45,6 +45,7 @@ ICONS = {
     "battery": "ic_battery_std_white_24dp",
     "gestures": "ic_touch_app",
     "timed": "ic_timelapse",
+    "music": "ic_music_note_white_24dp",
 }
 
 

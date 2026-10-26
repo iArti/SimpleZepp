@@ -43,8 +43,11 @@ object ZeppBridge {
             return
         }
 
+        // The watch tints its media screens with the player app's icon color
+        val payload = if (path == "/media/app/info") AccentColor.addToAppInfo(data) else data
+
         synchronized(lock) {
-            outbox.addLast(path to data)
+            outbox.addLast(path to payload)
             while (outbox.size > MAX_QUEUE) outbox.removeFirst()
             lock.notifyAll()
         }
@@ -63,6 +66,58 @@ object ZeppBridge {
             return messages
         }
     }
+
+    /** Name of the player app MediaControllerService is attached to (shown in the notification) */
+    @Volatile
+    var mediaApp: String? = null
+
+    /* Watch -> phone listeners besides WearMessageHandler (MediaControllerService) */
+
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<(String, ByteArray) -> Unit>()
+
+    fun addListener(listener: (String, ByteArray) -> Unit) {
+        listeners.add(listener)
+    }
+
+    fun removeListener(listener: (String, ByteArray) -> Unit) {
+        listeners.remove(listener)
+    }
+
+    fun dispatch(path: String, data: ByteArray) {
+        listeners.forEach { runCatching { it(path, data) } }
+    }
+
+    /* Cover art: kept here and served by /media/art; the queue only carries its id */
+
+    private const val ART_SIZE = 480
+    private var artId: String? = null
+    private var artBytes: ByteArray? = null
+
+    /** Stores the current cover scaled for the watch; returns its id, or null when there is none */
+    @Synchronized
+    fun putArtwork(bitmap: android.graphics.Bitmap?): String? {
+        if (bitmap == null) {
+            artId = null
+            artBytes = null
+            return null
+        }
+        val scale = minOf(1f, ART_SIZE.toFloat() / maxOf(bitmap.width, bitmap.height))
+        val scaled = if (scale < 1f) {
+            android.graphics.Bitmap.createScaledBitmap(
+                bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true
+            )
+        } else bitmap
+        val out = java.io.ByteArrayOutputStream()
+        scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
+        val bytes = out.toByteArray()
+        val crc = java.util.zip.CRC32().apply { update(bytes) }.value
+        artBytes = bytes
+        artId = java.lang.Long.toHexString(crc)
+        return artId
+    }
+
+    @Synchronized
+    fun artwork(id: String?): ByteArray? = if (id == null || id == artId) artBytes else null
 
     fun clear() {
         synchronized(lock) { outbox.clear() }

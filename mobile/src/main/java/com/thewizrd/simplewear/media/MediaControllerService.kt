@@ -74,6 +74,8 @@ import com.thewizrd.simplewear.helpers.PhoneStatusHelper
 import com.thewizrd.simplewear.preferences.Settings
 import com.thewizrd.simplewear.services.NotificationListener
 import com.thewizrd.simplewear.wearable.WearableManager
+import com.thewizrd.simplewear.zepp.ZeppBridge
+import com.thewizrd.simplewear.zepp.ZeppBridgeService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -145,7 +147,10 @@ class MediaControllerService : Service(), MessageClient.OnMessageReceivedListene
 
         fun enqueueWork(context: Context, work: Intent) {
             if (NotificationListener.isEnabled(context)) {
-                ContextCompat.startForegroundService(context, work)
+                // Zepp OS fork: the bridge's foreground service keeps the process in the foreground,
+                // so this runs as a plain service and shares the bridge's single notification
+                runCatching { context.startService(work) }
+                    .onFailure { Logger.writeLine(Log.ERROR, it, "MediaControllerService: start failed") }
             }
         }
     }
@@ -225,6 +230,8 @@ class MediaControllerService : Service(), MessageClient.OnMessageReceivedListene
         mWearableManager = WearableManager(this)
         mMessageClient = Wearable.getMessageClient(this)
         mMessageClient.addListener(this)
+        // Zepp OS fork: watch messages arrive through the local HTTP bridge instead
+        ZeppBridge.addListener(bridgeListener)
 
         connectedNodes = mutableSetOf()
 
@@ -253,15 +260,12 @@ class MediaControllerService : Service(), MessageClient.OnMessageReceivedListene
             initChannel()
         }
 
-        startForeground(createForegroundNotification(applicationContext))
-
         mAvailableMediaApps = mutableSetOf()
         getMediaAppControllers()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         disconnectJob?.cancel()
-        startForeground(createForegroundNotification(applicationContext))
 
         Logger.writeLine(Log.INFO, "$TAG: Intent action = ${intent?.action}")
 
@@ -301,7 +305,20 @@ class MediaControllerService : Service(), MessageClient.OnMessageReceivedListene
         return START_STICKY
     }
 
+    private val bridgeListener: (String, ByteArray) -> Unit = { path, data ->
+        mMainHandler.post { onMessageReceived(BridgeMessageEvent(path, data)) }
+    }
+
+    /** A bridge message shaped like a Wear OS MessageEvent, so onMessageReceived handles both */
+    private class BridgeMessageEvent(private val path: String, private val data: ByteArray) : MessageEvent {
+        override fun getRequestId(): Int = 0
+        override fun getPath(): String = path
+        override fun getData(): ByteArray = data
+        override fun getSourceNodeId(): String = ZeppBridge.NODE_ID
+    }
+
     override fun onDestroy() {
+        ZeppBridge.removeListener(bridgeListener)
         removeMediaState()
 
         connectedNodes.clear()
@@ -312,7 +329,8 @@ class MediaControllerService : Service(), MessageClient.OnMessageReceivedListene
 
         disconnectMedia(invalidateData = true)
 
-        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        ZeppBridge.mediaApp = null
+        ZeppBridgeService.refreshNotification(this)
         scope.cancel()
         super.onDestroy()
     }
@@ -725,6 +743,10 @@ class MediaControllerService : Service(), MessageClient.OnMessageReceivedListene
     }
 
     private fun sendAppInfo(mediaAppDetails: MediaAppDetails? = mSelectedMediaApp) {
+        if (ZeppBridge.mediaApp != mediaAppDetails?.appName) {
+            ZeppBridge.mediaApp = mediaAppDetails?.appName
+            ZeppBridgeService.refreshNotification(this)
+        }
         scope.launch {
             val appInfo = mediaAppDetails?.let {
                 val size = dpToPx(48f).toInt()
@@ -976,27 +998,8 @@ class MediaControllerService : Service(), MessageClient.OnMessageReceivedListene
     }
 
     private suspend fun sendDataByChannel(path: String, data: Any?, type: Type) {
-        val jobs = connectedNodes.toList().map { node ->
-            scope.async(Dispatchers.IO) {
-                runCatching {
-                    Wearable.getChannelClient(this@MediaControllerService).run {
-                        val channel = openChannel(node, path).await()
-                        val outputStream = getOutputStream(channel).await()
-
-                        outputStream.bufferedWriter().use { writer ->
-                            writer.write("data: ${JSONParser.serializer(data, type)}")
-                            writer.newLine()
-                            writer.flush()
-                        }
-                        close(channel)
-                    }
-                }.onFailure {
-                    Logger.error(TAG, it, "error sending data to channel; path = $path")
-                }
-            }
-        }.toTypedArray()
-
-        awaitAll(*jobs)
+        // Zepp OS fork: lists go through the bridge queue like any other message
+        ZeppBridge.enqueue(path, JSONParser.serializer(data, type)?.toByteArray(Charsets.UTF_8))
     }
 
     private suspend fun sendMediaPlayerState(
@@ -1011,9 +1014,10 @@ class MediaControllerService : Service(), MessageClient.OnMessageReceivedListene
     }
 
     private suspend fun sendMediaArtwork(nodeID: String? = null, bitmap: Bitmap? = null) {
-        val artworkBytes = bitmap?.toByteArray(format = Bitmap.CompressFormat.JPEG, quality = 50)
-        Logger.debug(TAG, "sendArtwork - bytes (${artworkBytes?.size ?: 0})")
-        mWearableManager.sendMessage(nodeID, MediaHelper.MediaPlayerArtPath, artworkBytes)
+        // Zepp OS fork: the bridge keeps the image (served at /media/art); the message carries its id
+        val artId = ZeppBridge.putArtwork(bitmap)
+        Logger.debug(TAG, "sendArtwork - id $artId")
+        mWearableManager.sendMessage(nodeID, MediaHelper.MediaPlayerArtPath, artId?.toByteArray(Charsets.UTF_8))
     }
 
     private suspend fun sendVolumeStatus(nodeID: String? = null) {
