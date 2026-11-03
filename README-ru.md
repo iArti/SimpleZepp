@@ -62,7 +62,7 @@
 
 ### 1. Приложение для телефона
 
-**Скачать:** [SimpleZepp-0.2.0.apk](https://github.com/iArti/SimpleZepp/releases/download/v0.2.0/SimpleZepp-0.2.0.apk)
+**Скачать:** [SimpleZepp-0.2.1.apk](https://github.com/iArti/SimpleZepp/releases/download/v0.2.1/SimpleZepp-0.2.1.apk)
 из [Releases](https://github.com/iArti/SimpleZepp/releases/latest) (подписан ключом автора) и установить —
 или собрать самому. APK с другой подписью поверх не встанет: сначала удалите установленный.
 
