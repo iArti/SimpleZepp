@@ -15,8 +15,9 @@ A fork of [SimpleWear](https://github.com/SimpleAppProjects/SimpleWear) by Dave 
 - **Phone battery** level on the main screen
 - **Music:** controls for whatever plays on the phone (Spotify, YouTube Music, any app with a media session),
   ported from [Spotify Remote](https://github.com/iArti/zepp-better-spotify-remote): cover screensaver
-  (tap = play/pause, double tap left/right = previous/next), progress ring, like (when the player offers it),
-  queue wheel, the player's own actions (shuffle, repeat, radio…, swipe up), choosing the player app, volume.
+  (tap = play/pause, double tap left/right = previous/next), progress ring, like (when the player offers it;
+  hold it to swap for shuffle), queue wheel, the player's own actions (shuffle, repeat, radio…, swipe up),
+  player screen (current app with its icon, app list, volume).
   Colors are taken from the player app's icon. A palm over the screen pauses
 - **Shortcut card:** Wi-Fi and cellular signal level, ringer mode and battery at a glance; tap or Select opens the app
 

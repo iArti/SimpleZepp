@@ -34,6 +34,7 @@
             "page/media/index",
             "page/mqueue/index",
             "page/mactions/index",
+            "page/plist/index",
             "page/players/index"
           ]
         },

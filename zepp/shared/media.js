@@ -53,6 +53,17 @@ export function findLike(actions) {
   return { id: action.action, liked: LIKED_RE.test(action.action || "") || LIKED_RE.test(action.title || "") };
 }
 
+// Shuffle is a custom action too (Spotify: TURN_SHUFFLE_ON / TURN_SHUFFLE_OFF).
+// The action offered is the opposite of the current state: "turn off" means shuffle is on.
+const SHUFFLE_RE = /shuffle|перемеш|вперемеш/i;
+
+export function findShuffle(actions) {
+  const list = (actions && actions.actions) || [];
+  const action = list.find((a) => SHUFFLE_RE.test(a.action || "") || SHUFFLE_RE.test(a.title || ""));
+  if (!action) return null;
+  return { id: action.action, on: /off|disable/i.test(action.action || "") };
+}
+
 // Everything except "like" goes to the actions page (shuffle, repeat, radio, …)
 export function otherActions(actions) {
   const like = findLike(actions);

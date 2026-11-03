@@ -180,14 +180,33 @@ Page(
         const item = this.items[this.focus + slot.offset];
         setText(slot.title, item ? item.name : "");
         if (slot.sub) setText(slot.sub.widget, item ? item.sub || "" : "");
-        const color = item && item.playing ? this.accent : slot.color;
-        slot.title.setProperty(prop.COLOR, color);
+        const playing = !!(item && item.playing);
+        slot.title.setProperty(prop.COLOR, playing ? this.accent : slot.color);
+        this.fitTitle(slot, playing);
         if (item && item.playing) eqSlot = slot;
       });
       this.placeEq(eqSlot);
 
       setText(this.counter, `${this.focus + 1} / ${n}`);
       this.renderArc();
+    },
+
+    eqUnit(slot) {
+      return Math.max(3, Math.round(slot.size / 8)); // bar width scales with the font
+    },
+
+    // Room the bars take left of the title (design px)
+    eqReserve(slot) {
+      return this.eqUnit(slot) * 5 + EQ_GAP;
+    },
+
+    // The playing title gives up room on the left for the bars, so they stay
+    // inside the slot (and inside the focus pill)
+    fitTitle(slot, playing) {
+      if (slot.narrowed === playing) return;
+      slot.narrowed = playing;
+      const cut = playing ? this.eqReserve(slot) : 0;
+      slot.title.setProperty(prop.MORE, { x: px(slot.x + cut), y: px(slot.y), w: px(slot.w - cut), h: px(slot.h) });
     },
 
     // Bars to the left of the centered title, bottom-aligned with its text
@@ -198,10 +217,12 @@ Page(
       }
       const item = this.items[this.focus + slot.offset];
       const { width } = getTextLayout(item.name, { text_size: px(slot.size), text_width: 0, wrapped: 0 });
-      const textW = Math.min(width, px(slot.w));
-      const unit = Math.max(3, Math.round(slot.size / 8)); // bar width scales with the font
+      const cut = this.eqReserve(slot);
+      const textW = Math.min(width, px(slot.w - cut));
+      const unit = this.eqUnit(slot);
       const groupW = unit * 5;
-      const left = px(W / 2) - textW / 2 - px(EQ_GAP) - px(groupW);
+      const center = px(slot.x + cut + (slot.w - cut) / 2);
+      const left = center - textW / 2 - px(EQ_GAP) - px(groupW);
       const bottom = px(slot.y + slot.h / 2 + slot.size * 0.35);
       [0.6, 1, 0.4].forEach((k, i) => {
         const h = px(Math.round(slot.size * 0.8 * k));

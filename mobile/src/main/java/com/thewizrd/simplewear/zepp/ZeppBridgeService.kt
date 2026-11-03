@@ -72,6 +72,7 @@ class ZeppBridgeService : Service() {
         private const val KEY_TOKEN = "key_zeppbridge_token"
         private const val TOKEN_HEADER = "x-bridge-token"
         private const val MAX_BODY = 1024 * 1024
+        private const val APP_ICON_SIZE = 96
 
         @Volatile
         private var running = false
@@ -244,6 +245,10 @@ class ZeppBridgeService : Service() {
                 // Cover art is binary; the app-side downloads it with network.downloader
                 if (request.path == "/media/art") {
                     serveArtwork(request, sock.getOutputStream())
+                    return
+                }
+                if (request.path == "/media/appicon") {
+                    serveAppIcon(request, sock.getOutputStream())
                     return
                 }
                 val (code, body) = try {
@@ -433,6 +438,29 @@ class ZeppBridgeService : Service() {
             return
         }
         respond(out, 200, art, "image/jpeg")
+    }
+
+    // GET /media/appicon?pkg=<package>&t=<token>: the player app's launcher icon as a PNG
+    private fun serveAppIcon(req: Request, out: OutputStream) {
+        val token = getToken()
+        if (token == null || (req.query["t"] ?: req.headers[TOKEN_HEADER]) != token) {
+            respond(out, 401, JSONObject().put("error", "unauthorized").toString())
+            return
+        }
+        val png = runCatching {
+            val drawable = packageManager.getApplicationIcon(req.query["pkg"] ?: "")
+            val bmp = android.graphics.Bitmap.createBitmap(APP_ICON_SIZE, APP_ICON_SIZE, android.graphics.Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(bmp)
+            drawable.setBounds(0, 0, APP_ICON_SIZE, APP_ICON_SIZE)
+            drawable.draw(canvas)
+            java.io.ByteArrayOutputStream().also { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                .toByteArray()
+        }.getOrNull()
+        if (png == null) {
+            respond(out, 404, JSONObject().put("error", "no_app").toString())
+            return
+        }
+        respond(out, 200, png, "image/png")
     }
 
     private fun respond(out: OutputStream, code: Int, json: String) {

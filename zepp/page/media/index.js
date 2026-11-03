@@ -30,7 +30,8 @@ import { W, DARK, RED, text, setText, iconButton, errorText, ignorePalm } from "
 import { ensureFileReceiver } from "../../shared/files";
 import { rightHandMode } from "../../shared/config";
 import { getAccent, saveAccent } from "../../shared/accent";
-import { MEDIA, AUTOLAUNCH, toPlayer, findLike } from "../../shared/media";
+import { saveMediaApp } from "../../shared/players";
+import { MEDIA, AUTOLAUNCH, toPlayer, findLike, findShuffle } from "../../shared/media";
 import { send, subscribe, dispatch, keepAlive } from "../../shared/link";
 
 // Media control, ported from Spotify Remote's control page: screensaver (cover + clock)
@@ -47,6 +48,9 @@ const MAX_BRIGHT_MS = 2147483000;
 // Screensaver taps: one = play/pause, two = prev (left half) / next (right half)
 const DOUBLE_TAP_MS = 300;
 const TAP_SLOP = 24; // finger movement that still counts as a tap, not a swipe
+// Holding the like button swaps it with a shuffle toggle (remembered), as in Spotify Remote
+const LIKE_HOLD_MS = 600;
+const LIKE_SLOT_KEY = "likeSlot"; // "like" or "shuffle"
 // Page dots on the screensaver fade out after this
 const SAVER_DOTS_MS = 2000;
 // Screensaver text: no marquee, no ellipsis; long lines run off the right edge into the vignette
@@ -137,6 +141,7 @@ Page(
       ignorePalm();
       this.accent = getAccent();
       this.like = null;
+      this.shuffle = null;
 
       setScrollMode({
         mode: SCROLL_MODE_SWIPER,
@@ -350,7 +355,8 @@ Page(
         radius: px(LIKED_R),
         color: this.accent,
       });
-      this.likeBtn = iconButton(likeX, top + BOTTOM_Y, 96, 64, ICON("like_add"), () => this.toggleLike());
+      this.likeBtn = iconButton(likeX, top + BOTTOM_Y, 96, 64, ICON("like_add"), null);
+      this.bindLikePress(this.likeBtn);
       iconButton(240, top + QUEUE_Y, 90, 54, ICON("queue"), () => push({ url: "page/mqueue/index" }));
       iconButton(240 + BOTTOM_DX, top + BOTTOM_Y, 96, 64, ICON("player"), () => push({ url: "page/players/index" }));
       this.renderLike();
@@ -489,10 +495,12 @@ Page(
           localStorage.setItem("mediaState", JSON.stringify(s));
         },
         [MEDIA.APP_INFO]: (m, info) => {
+          saveMediaApp(info);
           if (saveAccent(info)) this.setAccent(getAccent());
         },
         [MEDIA.ACTIONS]: (m, actions) => {
           this.like = findLike(actions);
+          this.shuffle = findShuffle(actions);
           this.renderLike();
         },
         [MEDIA.CONNECT]: (m) => {
@@ -530,12 +538,76 @@ Page(
       if (!this.flashTimer) this.hideFlash();
     },
 
-    // No like action (player without one): hide the button
+    // The bottom-left button shows shuffle when chosen by a hold (or when the player has no like);
+    // a player with neither hides it. "On" = a disk in the accent color under a dark glyph.
+    slotIsShuffle() {
+      if (!this.shuffle) return false;
+      return !this.like || localStorage.getItem(LIKE_SLOT_KEY, "like") === "shuffle";
+    },
+
     renderLike() {
-      const like = this.like;
-      this.likeBtn.setProperty(prop.VISIBLE, !!like);
-      this.likedDisk.setProperty(prop.VISIBLE, !!(like && like.liked));
-      if (like) this.likeBtn.setProperty(prop.SRC, ICON(like.liked ? "like_check" : "like_add"));
+      let icon = null;
+      let on = false;
+      if (this.slotIsShuffle()) {
+        on = this.shuffle.on;
+        icon = on ? "shuffle_glyph" : "shuffle_off";
+      } else if (this.like) {
+        on = this.like.liked;
+        icon = on ? "like_check" : "like_add";
+      }
+      this.likeBtn.setProperty(prop.VISIBLE, !!icon);
+      this.likedDisk.setProperty(prop.VISIBLE, !!icon && on);
+      if (icon) this.likeBtn.setProperty(prop.SRC, ICON(icon));
+    },
+
+    // Tap = like / shuffle, hold = swap the two
+    bindLikePress(w) {
+      let down = null;
+      let held = false;
+      const cancelHold = () => {
+        if (this.likeHoldTimer) clearTimeout(this.likeHoldTimer);
+        this.likeHoldTimer = null;
+      };
+      w.addEventListener(event.CLICK_DOWN, (e) => {
+        down = { x: e.x, y: e.y };
+        held = false;
+        cancelHold();
+        this.likeHoldTimer = setTimeout(() => {
+          this.likeHoldTimer = null;
+          held = true;
+          this.swapLikeSlot();
+        }, LIKE_HOLD_MS);
+      });
+      // A swipe between screens that starts on the button is not a hold
+      w.addEventListener(event.MOVE, (e) => {
+        if (down && (Math.abs(e.x - down.x) > px(TAP_SLOP) || Math.abs(e.y - down.y) > px(TAP_SLOP))) cancelHold();
+      });
+      w.addEventListener(event.CLICK_UP, (e) => {
+        cancelHold();
+        const start = down;
+        down = null;
+        if (held || !start) return;
+        if (Math.abs(e.x - start.x) > px(TAP_SLOP) || Math.abs(e.y - start.y) > px(TAP_SLOP)) return;
+        this.toggleLike();
+      });
+    },
+
+    // Only meaningful when the player offers both
+    swapLikeSlot() {
+      if (!this.like || !this.shuffle) return;
+      const shuffle = localStorage.getItem(LIKE_SLOT_KEY, "like") === "shuffle";
+      localStorage.setItem(LIKE_SLOT_KEY, shuffle ? "like" : "shuffle");
+      this.renderLike();
+    },
+
+    toggleShuffle() {
+      const shuffle = this.shuffle;
+      if (!shuffle) return;
+      this.shuffle = { ...shuffle, on: !shuffle.on };
+      this.renderLike();
+      send(this, MEDIA.ACTIONS_CLICK, { text: shuffle.id })
+        .then(() => setTimeout(() => send(this, MEDIA.ACTIONS).catch(() => {}), 600))
+        .catch((e) => this.showError(errorText(e)));
     },
 
     // The ring lives on the controls screen; don't redraw it while the screensaver is up
@@ -594,6 +666,10 @@ Page(
     },
 
     toggleLike() {
+      if (this.slotIsShuffle()) {
+        this.toggleShuffle();
+        return;
+      }
       const like = this.like;
       if (!like) return;
       this.like = { ...like, liked: !like.liked };
@@ -611,6 +687,7 @@ Page(
     onDestroy() {
       this.state.timers.forEach((t) => clearInterval(t));
       if (this.tapTimer) clearTimeout(this.tapTimer);
+      if (this.likeHoldTimer) clearTimeout(this.likeHoldTimer);
       if (this.flashTimer) clearTimeout(this.flashTimer);
       if (this.dotsTimer) clearTimeout(this.dotsTimer);
       if (this.stopKeepAlive) this.stopKeepAlive();

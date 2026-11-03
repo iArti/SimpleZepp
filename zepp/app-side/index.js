@@ -81,70 +81,110 @@ const STRIP_ICONS = {
   "/media/queueitems": (d) => ({ ...d, queueItems: (d.queueItems || []).map(noIcon) }),
 };
 
-/* Cover art: the phone serves the current cover at /media/art; the watch gets it as a file.
-   Same pipeline as Spotify Remote: download -> PNG -> TransferFile. */
+/* Images for the watch, sent as files (same pipeline as Spotify Remote):
+   download from the phone (loopback) -> PNG -> TransferFile, one at a time.
+   - covers: /media/art, the current one only, ahead of everything else
+   - app icons: /media/appicon, for the player screen */
 
-const COVER_JOB_TIMEOUT_MS = 60000;
+const IMAGE_JOB_TIMEOUT_MS = 60000;
+const imageQueue = [];
+let imageCurrent = null; // key of the job being transferred
 let coverWatchHas = ""; // cover id the watch already shows (it tells us on open)
-let coverJob = null; // id being transferred
-let coverPending = null; // newest id waiting for the current job
 let coverSlot = 0;
+const iconsSent = {}; // package -> true once the watch has its icon
 
-function sendCover(id) {
-  if (!id || id === coverWatchHas || id === coverJob) return;
-  if (coverJob) {
-    coverPending = id;
-    return;
-  }
-  coverJob = id;
-  coverSlot = 1 - coverSlot;
-  const name = coverSlot ? "cover_a" : "cover_b";
+function isQueued(key) {
+  return imageCurrent === key || imageQueue.some((j) => j.key === key);
+}
+
+function enqueueImage(job, urgent) {
+  if (urgent) imageQueue.unshift(job);
+  else imageQueue.push(job);
+  pumpImages();
+}
+
+function pumpImages() {
+  if (imageCurrent || !imageQueue.length) return;
+  const job = imageQueue.shift();
+  imageCurrent = job.key;
   let finished = false;
   const finish = (state) => {
     if (finished) return;
     finished = true;
     clearTimeout(watchdog);
-    if (state === "transferred") coverWatchHas = id;
-    else console.log("cover failed", id, state);
-    coverJob = null;
-    const next = coverPending;
-    coverPending = null;
-    if (next) sendCover(next);
+    if (state === "transferred") job.done();
+    else console.log("image failed", job.key, state);
+    imageCurrent = null;
+    pumpImages();
   };
-  // A stuck callback must not block covers forever
-  const watchdog = setTimeout(() => finish("timeout"), COVER_JOB_TIMEOUT_MS);
+  // A stuck callback must not block the queue forever
+  const watchdog = setTimeout(() => finish("timeout"), IMAGE_JOB_TIMEOUT_MS);
+
+  const transfer = (path) => {
+    const outbox = transferFile.outbox || transferFile.getOutbox();
+    const file = outbox.enqueueFile(path, job.params);
+    file.on("change", (e) => {
+      const state = e.data.readyState;
+      if (state === "transferred" || state === "error" || state === "canceled") finish(state);
+    });
+  };
 
   try {
     // filePath is relative to data://download
-    const task = network.downloader.downloadFile({
-      url: `${BASE}/media/art?id=${id}&t=${getToken()}`,
-      timeout: 30000,
-      filePath: `${name}.jpg`,
-    });
+    const task = network.downloader.downloadFile({ url: job.url, timeout: 30000, filePath: `${job.name}.${job.ext}` });
     task.onSuccess = (ev) => {
       if (ev.statusCode && ev.statusCode !== 200) {
         finish("dl http " + ev.statusCode);
         return;
       }
+      const downloaded = ev.filePath || ev.tempFilePath || `data://download/${job.name}.${job.ext}`;
+      // PNG goes as is; JPEG covers are converted first
+      if (job.ext === "png") {
+        transfer(downloaded);
+        return;
+      }
       image
-        .convert({
-          filePath: ev.filePath || ev.tempFilePath || `data://download/${name}.jpg`,
-          targetFilePath: `data://download/${name}.png`,
-        })
-        .then((result) => {
-          const outbox = transferFile.outbox || transferFile.getOutbox();
-          const file = outbox.enqueueFile(result.targetFilePath, { kind: "cover", coverId: id });
-          file.on("change", (e) => {
-            const state = e.data.readyState;
-            if (state === "transferred" || state === "error" || state === "canceled") finish(state);
-          });
-        })
+        .convert({ filePath: downloaded, targetFilePath: `data://download/${job.name}.png` })
+        .then((result) => transfer(result.targetFilePath))
         .catch((e) => finish("conv err: " + ((e && e.message) || e)));
     };
     task.onFail = (ev) => finish("dl err: " + ev.code + " " + ev.message);
   } catch (e) {
     finish("err: " + ((e && e.message) || e));
   }
+}
+
+function sendCover(id) {
+  if (!id || id === coverWatchHas || isQueued("cover:" + id)) return;
+  // only the newest cover matters: drop older ones still waiting
+  for (let i = imageQueue.length - 1; i >= 0; i--) if (imageQueue[i].key.startsWith("cover:")) imageQueue.splice(i, 1);
+  coverSlot = 1 - coverSlot;
+  enqueueImage(
+    {
+      key: "cover:" + id,
+      url: `${BASE}/media/art?id=${id}&t=${getToken()}`,
+      name: coverSlot ? "cover_a" : "cover_b",
+      ext: "jpg",
+      params: { kind: "cover", coverId: id },
+      done: () => (coverWatchHas = id),
+    },
+    true
+  );
+}
+
+function sendAppIcon(pkg) {
+  if (!pkg || iconsSent[pkg] || isQueued("icon:" + pkg)) return;
+  enqueueImage(
+    {
+      key: "icon:" + pkg,
+      url: `${BASE}/media/appicon?pkg=${encodeURIComponent(pkg)}&t=${getToken()}`,
+      name: "icon_" + pkg.replace(/[^A-Za-z0-9]/g, "_"),
+      ext: "png",
+      params: { kind: "appicon", pkg },
+      done: () => (iconsSent[pkg] = true),
+    },
+    false
+  );
 }
 
 // The apps list carries base64 PNG icons; the watch shows names only for now
@@ -242,6 +282,12 @@ AppSideService(
         case "media_cover":
           // the watch already shows this cover (kept across app restarts)
           coverWatchHas = p.have || "";
+          job = Promise.resolve("ok");
+          break;
+        case "app_icon":
+          // the watch keeps icons across restarts and says whether it has this one
+          if (p.have) iconsSent[p.pkg] = true;
+          else sendAppIcon(p.pkg);
           job = Promise.resolve("ok");
           break;
         case "keepalive":
